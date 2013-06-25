@@ -1,0 +1,188 @@
+globals [
+  ; Whale energy and life-dynamics constants (inherited from Mock/Test non-spatial model)
+  HUNT-AGE-MIN          HUNT-AGE-MAX
+  FEMALE-MAX-MASS       MALE-MAX-MASS
+  BIRTHMASS
+  BIRTH-MASS-LOSS
+  FEMALE-VON-BERT       MALE-VON-BERT
+  STARVE-BEGIN-PERCENT  STARVE-END-PERCENT
+  DAYSPREGNANCY
+  EFFECTIVE-SIZE-MAX
+  PREGNANCY-WEIGHT-GAIN 
+  PREGNANCY-TISSUE-MASS 
+  ABORTION-THRESHOLD
+  WHALE-KCAL-PER-KG 
+  ENERGY-TO-FETUS-EFFICIENCY  ENERGY-TO-MILK-EFFICIENCY  PREY-TO-ENERGY-EFFICIENCY ENERGY-TO-MASS-EFFICIENCY
+  FMR-CONSTANT         FMR-EXPONENT
+  GUT-MASS-PERCENT
+  MILK-KCAL-PER-GRAM
+  P-NEONATE-SURV 
+  LACTATION-DECREASE 
+  LACTATION-CEASE 
+  MILK-TO-ENERGY-EFFICIENCY
+  BREEDING-SEASON-START-DAY
+  BREEDING-SEASON-END-DAY 
+  PREGNANCY-THRESHOLD
+  REPRO-K
+  MEAN-DAY-PREGNANT 
+  ST-DEV-DAY-PREGNANT
+  NEONATE-K 
+  JUVENILE-K 
+  JUVENILE-MAX
+  
+  ; SOME NEW GLABOBALS RELATING TO SPATIAL MODELING AND THE HOURLY TIME FRAME
+  ; distance globals given in kms
+  hunt-radius           ; whales will sense prey within this radius; given in kms
+  hiding-time           ; prey, when warned of KWs, will hide for this many ticks
+  hiding-effectiveness  ; the percentage of prey that will not be considered in encounter rates when prey are hiding.
+  
+  tired-threshold        ; if whales have not rested for this many hours, they will be tired 
+  whale-speed            ; in km/h
+  travel-depth           ; max distance from the nearest shore that whales will attempt to stay at when in travel mode
+   
+   ; probability tables for survival and conception for healthy whales based on age.
+   FEMALE-SURV
+   MALE-SURV
+   MX  
+   
+     
+    
+  ; constants relating to the prey-data and hunting-data lists 
+  ; these constants specify the index in the lists that each piece of information is
+   NAME#                 ; location in BOTH lists of the text giving the species name -- should be the same text for all age classes
+   
+  ; --- hunting-data list index of...
+   CLASS#                ; the age class:  J0,...J6 or AF or AM.    
+   GLOBAL-POP#           ; the global population of the members of this age classs 
+                         ; this represents initial values, or prey that are currently off-world or undistributed. 
+                         ; once prey have been distributed, they are not counted toward this GLOBAL-POP# value
+   BIRTHING-DATE#        ; day number when a member of this class jumps an age class. 
+   ; The value in hunting-data of BIRTHING-DATE# is also used to compute the mass of an individual on a given day, using a linear scale from START-MASS to END-MASS
+   START-MASS#            
+   END-MASS#            
+   KCAL-PER-GRAM#        ; Energy available to whales who consume 
+   SURVMAX#              ; constants determining density-dependent survival
+   SURVA#
+   SURVB#   
+   ENCOUNTER-RATE#       ; constant determining number of whale-prey encounters based on the population 
+   VULNMAX#              ; constants determining success of whale hunt on this member, based on size of whale hunting group 
+   VULNA#                    
+   VULNB# 
+   
+  ; ---- prey-data list index of...                                     
+   NUM-CLASSES#          ; number of different age classes of this species, including AF and AM as separate classes
+   BIRTHMAX#             ; constants for the species determing the birth-rate based on AF population
+   BIRTHA#
+   BIRTHB#
+   
+   ; The following is multiplicative costant used to determine the number of patches examined for the normal distribution of prey.
+   ; Whale distribution is based on a normal distribution with some standard deviation.
+   ; Patches will be examine up to a distance of K-DIST-MAX times standard deviation. 
+   K-DIST-MAX                          
+]
+
+to init-whale-globals
+  set PREY-TO-ENERGY-EFFICIENCY 0.85
+  set HUNT-AGE-MIN 3
+  set HUNT-AGE-MAX 12
+  set FEMALE-MAX-MASS 2700
+  set MALE-MAX-MASS 4733
+  set DAYSPREGNANCY 510               ; gestation period in das
+  set BIRTHMASS 182                   ; mass of newborn whale
+  set BIRTH-MASS-LOSS 0.20            ; mass of tissues lost (by the mother) in birth, as a percentage of the birthmass
+  set FEMALE-VON-BERT 0.0004
+  set MALE-VON-BERT 0.0004
+  set STARVE-BEGIN-PERCENT 0.9
+  set STARVE-END-PERCENT 0.7
+  set EFFECTIVE-SIZE-MAX 1.0
+  set PREGNANCY-WEIGHT-GAIN 0.00      ;  Additional weight gained by mother, as a percent of fetal mass
+  set PREGNANCY-TISSUE-MASS 0.20      ;  Mass of additional tissue, as a percent of fetal mass
+  set ABORTION-THRESHOLD 0.80         ; Abort pregnancy if mother's mass drops below 80% of ideal
+  set WHALE-KCAL-PER-KG  3.408 * 1000
+  set ENERGY-TO-FETUS-EFFICIENCY 0.20
+  set ENERGY-TO-MILK-EFFICIENCY 0.75
+  set ENERGY-TO-MASS-EFFICIENCY 0.60
+  set MILK-TO-ENERGY-EFFICIENCY 0.95
+  set FMR-CONSTANT 405.39
+  set FMR-EXPONENT 0.756
+  set GUT-MASS-PERCENT 0.04
+  set MILK-KCAL-PER-GRAM 3.69
+  set P-NEONATE-SURV 0.7
+  set LACTATION-DECREASE 0.85
+  set LACTATION-CEASE 0.75
+  set BREEDING-SEASON-START-DAY 60       ;  Breeding season starts on day 60 to day 270
+  set BREEDING-SEASON-END-DAY 270
+  set PREGNANCY-THRESHOLD 0.00
+  set REPRO-K 500
+  set MEAN-DAY-PREGNANT 165.0
+  set ST-DEV-DAY-PREGNANT 35
+  set NEONATE-K 500
+  set JUVENILE-K 5000
+  set JUVENILE-MAX 20
+  
+  ; Init constants relating to whale behavior and the current spatial and temporal time frame.
+  ; These are new constants, not inherited from the non-spatial model. Comments on meaning above.
+  set tired-threshold 15    
+  set whale-speed 8
+  set hunt-radius 2 
+  set hiding-time 6
+  set hiding-effectiveness 0.8         
+  set travel-depth 15
+  
+  ; Read probability tables
+  ; The file has a row with four values for every possible whale age in years. 
+  ; Entry 1 is the age.
+  ; Entries 2 and 3 are probabilities of female and male survival (independent of starvation)
+  ; Entry 4 is the MX table for conception probabilities
+  file-open "popparms.txt"
+  set FEMALE-SURV (list)
+  set MALE-SURV (list)
+  set MX (list)
+  let ctr 0
+  let fail? false
+  while [not file-at-end? and not fail?][
+     ; Make sure the next line in the file corresponds to the expected age
+     ; show (word "Reading poparms for year: " ctr)
+     let age-check file-read
+     ifelse age-check != ctr [
+       set fail? true
+       print "Failure reading probability file"
+     ][
+       set ctr (ctr + 1)
+     ]
+     set FEMALE-SURV (lput file-read FEMALE-SURV)
+     set MALE-SURV (lput file-read MALE-SURV)    
+     set MX (lput file-read MX)
+  ]
+  file-close
+end
+
+
+to init-prey-constants
+  
+  ; Constants ending with # indicate a index into a list.  NAME# applies to both prey-data and hunting-data lists
+  set NAME#  0      ; index into both the prey-data and hunting-data arrays of the name of the species
+  
+  ; indices to various pieces of data in each hunting-data list.  See comments in globals above for explanations
+  set CLASS#  1           
+  set GLOBAL-POP#  2      
+  set BIRTHING-DATE#  3   
+  set START-MASS#  4      
+  set END-MASS#  5       
+  set KCAL-PER-GRAM#  6   
+  set SURVMAX#  7        
+  set SURVA#  8
+  set SURVB#  9
+  set ENCOUNTER-RATE#  10  
+  set VULNMAX#    11
+  set VULNA#   12
+  set VULNB#  13
+  
+  ; indices to various pieces of data in each prey-data list.  See comments in globals above for explanations
+  set NUM-CLASSES#    1    
+  set BIRTHMAX#       2    
+  set BIRTHA#         3
+  set BIRTHB#         4
+  
+  set K-DIST-MAX 3
+end
