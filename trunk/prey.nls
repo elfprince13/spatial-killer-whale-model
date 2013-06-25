@@ -42,7 +42,6 @@ to init-prey
   load-hunting-data
 end
 
-
 ; This procedure reads the files containing the data needed for the hunting-data and prey-data lists that contain data about prey species
 ; and age classes
 to load-hunting-data
@@ -62,7 +61,7 @@ end
 to load-data [prey-file-name]
   file-open prey-file-name
   let classes-count 0           ; Keeps track of the number of age classes. 
-  ; Note that the third age class shoudl be of the form "Jx" where x is an integer representing the largest juvenile age class. x+2 should be total number of classes.
+  ; Note that the third age class should be of the form "Jx" where x is an integer representing the largest juvenile age class. x+2 should be total number of classes.
   
   ; The first line in the file corresponds to adult females and contains 17 items
   ; The second line corresponds to adult males and contains 14 items

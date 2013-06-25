@@ -62,6 +62,7 @@ globals [
   ; level of text output to the user while the simulation is initialized and run. Each level is inclusive of the previous  
   SETUP-MONITOR-LEVEL          ; 0 = no output.   1 = stages   ; 2 = mid-level      ; 3 = details 
   RUN-MONITOR-LEVEL            ; All output is to a file.  0 = no output   1 = basic decisions   ; 2 = mid-level      ; 3 = details such as prey counts, paths found
+  DEBUG-MONITOR-LEVEL
   
   ; stats
   successful-mating
@@ -77,9 +78,15 @@ to setup
   ca
   
   set SETUP-MONITOR-LEVEL 2
+  set DEBUG-MONITOR-LEVEL 2
   
   ; Initialize the physical world
-  load-map                  ; Loads map data from an image, determine which patches are are land, coast, water, and inland.
+  load-map                  ; Loads map data from an image, determine which patches are are land, coast, and water.
+  
+  ; set the distance from each water patch to the nearest coastal patch, and color water accordingly -- darker is farther from shore.
+  set-distance-in
+  
+  
   compute-vd                ; Identify islands. For each water patch, compute the nearest land patch -- this implicitly gives the Voronoi diagram.
   make-graph                ; Create a graph of nodes (including special anchor nodes) to be used for long distance whale movement
   all-anchors-SSSP          ; Compute the shortest path from all graph nodes to all anchor nodes, and store the shortest-path info in the nodes. 
@@ -107,11 +114,9 @@ to setup
   
   set RUN-MONITOR-LEVEL 2     ; 1 = minimal screen output   2 = file output of hunting events and daily decisions    3 = file output of detailed decisions
     
-  if RUN-MONITOR-LEVEL > 1 [
-    let file-name (word "Testrun-" (substring date-and-time 16 27) "-" (substring date-and-time 0 8))
-    file-open file-name
-    file-print (word "Whale test run on " date-and-time " with " INITIAL-NUMBER-WHALES " whales.") 
-  ]
+  let file-name (word "Testrun-" (substring date-and-time 16 27) "-" (substring date-and-time 0 8))
+  file-open file-name
+  file-print (word "Whale test run on " date-and-time " with " INITIAL-NUMBER-WHALES " whales.") 
 
   reset-ticks
 end
@@ -124,7 +129,7 @@ end
 ; Initialization of the population of whales
 ; In v 1.0, whales ages, genders, etc. are random, and there is one matrilineal line
 to init-whales
-  if SETUP-MONITOR-LEVEL > 0 [print "Initializing whales..."]
+  SETUP-MONITOR 0 "Initializing whales..."
   init-whale-globals
 
   ; initialize a random population of whales, 50% female, aged 2 to 24, with no pregnant or lactating females
@@ -170,7 +175,7 @@ to init-whales
   ask n-of (INITIAL-NUMBER-WHALES / 3.5) whales with [age-years >= 10] [
     set is-leader? true                              ; identify this whale as a leader who will be making group decisions
     set group (turtle-set self)                      ; put each leader in his own group
-    move-to one-of inland                            ; move to a random inland patch
+    move-to one-of water with [shore-dist < 30 and shore-dist > -1]      ; move to a random patch which isn't "too far out"
   ]
   ask whales with [not is-leader?] [join-random-group]      ; put all whales in some group
   balance-groups                                            ; there should be variance among group sizes, but don't allow groups of just 1 adult
@@ -244,7 +249,7 @@ end
 ; At the start of each turn, we take care of group dynamics (fusion and fision)
 ; Movement is decided by the leader of each currently existing group 
 to move-whales
-   if RUN-MONITOR-LEVEL > 0 [print "Moving all whales (by calls to group leaders)."]
+   RUN-MONITOR 0 "Moving all whales (by calls to group leaders)."
    ask leaders [movement-decisions]
 end
 
@@ -275,7 +280,7 @@ end
 ; ... But also decrease body-mass from cals consumed by metabolism
 ; Age each whale one day
 to daily-step
-   if RUN-MONITOR-LEVEL > 1 [file-show (word " going through dail step. kcals-consumed = " kcals-consumed ". gut-fill = " gut-fill ". Age = " age-years ":" age-days)]
+   RUN-MONITOR 1 (word " going through dail step. kcals-consumed = " kcals-consumed ". gut-fill = " gut-fill ". Age = " age-years ":" age-days)
    ; ** MODIFY FOR FEMALES.  
     
    ; Check for death
@@ -291,12 +296,8 @@ to daily-step
    set gut-fill 0
    
    if starved-to-death? [
-     if RUN-MONITOR-LEVEL > 0 [
-       show " died of starvation."
-       if RUN-MONITOR-LEVEL > 1 [
-         file-show (word " died of starvation at age = " age-years ":" age-days ". Current destination: " destination)
-       ]
-     ]
+     RUN-MONITOR 0 " died of starvation."
+     RUN-MONITOR 1 (word " died of starvation at age = " age-years ":" age-days ". Current destination: " destination)
      set whales-starved (whales-starved + 1)
      die
    ]
@@ -319,7 +320,7 @@ end
 ; CONTEXT:  One whale (female)
 ; comment this ****
 to update-pregnancy
-  if RUN-MONITOR-LEVEL > 1 [file-show " pregnancy update."]
+  RUN-MONITOR 1 " pregnancy update."
   ifelse (days-to-birth > 0) [
     set days-to-birth (days-to-birth - 1)
     set pregnancy-cost pregnancy-cost + fetal-growth ( DAYSPREGNANCY - days-to-birth) * (1 + PREGNANCY-TISSUE-MASS)
@@ -339,10 +340,10 @@ to update-pregnancy
             ; We just got pregnant
             set days-to-birth DAYSPREGNANCY;
             set successful-mating (successful-mating + 1)
-            if RUN-MONITOR-LEVEL > 1 [file-show " is now pregnant."]
+            RUN-MONITOR 1 " is now pregnant."
           ][
             ; We weren't healthy enough...
-            if RUN-MONITOR-LEVEL > 1 [file-show " failed to conceive."]
+            RUN-MONITOR 1 " failed to conceive."
           ]
         ]
       ]
@@ -378,7 +379,7 @@ to check-begin-conception
         ]
       
       set conception-day conception;
-        if RUN-MONITOR-LEVEL > 1 [file-show  (word " might get pregnant on day " conception-day)]
+        RUN-MONITOR 1 (word " might get pregnant on day " conception-day)
 end
 
 ; Context: One whale, a pregnant female, calls this procedure. 
@@ -401,7 +402,7 @@ to give-birth
          
   
   ifelse d < pDie [
-    if RUN-MONITOR-LEVEL > 1 [file-show  "Gave birth to a child that does not survive"]
+    RUN-MONITOR 1 "Gave birth to a child that does not survive"
     set whales-died-at-birth (whales-died-at-birth + 1)
   ][  
     set whales-born (whales-born + 1)
@@ -440,7 +441,7 @@ to nurse
  ; Don't try to nurse if mother has died.
  if whale mother-id = nobody [stop]
  
- if RUN-MONITOR-LEVEL > 1 [file-show  "...is nursing."]
+ RUN-MONITOR 1 "...is nursing."
  let kgs (desired-food-kgs * food-percent-from-milk)                                       ; amount of food to be acquired from nursing
  let mom-cond (([body-mass] of whale mother-id)   / ([expected-mass] of whale mother-id))  ; condition of mother based on ratio of actual to desired mass
  
@@ -462,7 +463,7 @@ end
 ; This procedure assumes there is available food near this patch. The whales do not move. The leader of the group
 ; assigns nutrition value to all the whales in the group based on the value of the prey.
 to hunt
-  if RUN-MONITOR-LEVEL > 1 [file-show  " is deciding to hunt"]
+  RUN-MONITOR 1 " is deciding to hunt"
   let effective-group-size sum [effective-size] of group      ; number of whales in the group counting toward the hunt   
   let all-prey (get-prey-list effective-group-size)           ; lists every individual prey catchable, by type
   share-the-food all-prey
@@ -510,7 +511,7 @@ end
 ; provides food for whales.
 ; ** This is a helper procedure for hunt
 to share-the-food [all-prey]
-  if RUN-MONITOR-LEVEL > 1 [file-show  (word "is sharing a prey-list " all-prey)]
+  RUN-MONITOR 1 (word "is sharing a prey-list " all-prey)
   let the-group sort group                            ; An ordered list of the whales in this group.
   let desired-food map [desired-food-kgs] the-group   ; amount of food each whale wants, with whales ordered the same as in the-group
   let eaten-food map [0.0] the-group                  ; amount of food each whale has eaten, with whales ordered the same as in the-group
@@ -555,7 +556,7 @@ end
 ; Strategies (local optimization and past memory) to locate food
 ; This procedure assumes that the whales will move, and will not be hunting in the current patch
 to seek-food
-  if RUN-MONITOR-LEVEL > 1 [file-show  " is seeking food"]
+  RUN-MONITOR 1  " is seeking food"
   let travel-radius (whale-speed / kmpp)                                       ; distance in patches a whale can travel in one hour
   let group-size (sum [effective-size] of group)
   let best-nearby max-one-of other water-patches-within travel-radius [food-rating group-size]  ; patch in that radius with the most food
@@ -563,7 +564,7 @@ to seek-food
   ;If there is a patch within one time-unit of travel with enough food, then travel to that patch. Otherwise seek a more global solution.
   ;Note that if the whale was on long distance travel mode when it found local food, then the travel destination and path should be cleared.
   ifelse [food-rating group-size] of best-nearby >= 1 [ 
-     if RUN-MONITOR-LEVEL > 1 [file-show (word " has decided to hunt local food and is clearing path. Destination was " destination) ]
+     RUN-MONITOR 1 (word " has decided to hunt local food and is clearing path. Destination was " destination)
      set destination nobody
      set current-path nobody
 
@@ -584,15 +585,15 @@ end
 ; This procedure follows a precomputed path to the desired destination. 
 ; The path is a list of patches stored in whale variable current-path. If that variable does not have a path, the path is computed.
 to travel
-   if RUN-MONITOR-LEVEL > 1 [file-show  (word "is traveling, starting at " patch-here)]
+   RUN-MONITOR 1  (word "is traveling, starting at " patch-here)
    if destination = nobody [
      choose-destination
-     if RUN-MONITOR-LEVEL > 1 [file-show (word " chose destination " destination)]
+     RUN-MONITOR 1 (word " chose destination " destination)
    ]
    ; If no path exists, compute a path from the current patch to the destination.
    if current-path = nobody [
      set current-path path-from-patch-to-patch patch-here destination
-     if RUN-MONITOR-LEVEL > 2 [file-show (word " found the following path: " current-path)]
+     RUN-MONITOR 2 (word " found the following path: " current-path)
    ]
    toward-destination
 end
@@ -607,7 +608,7 @@ to toward-destination
    let patches-can-travel (whale-speed / kmpp)      ; distance (in patch units) a whale can travel in one time step
    let group-size (sum [effective-size] of group)   ; ** CAN BE USED TO DECIDE WHETHER TO PAUSE AND HUNT LOCALLY **
    
-   if RUN-MONITOR-LEVEL > 1 [file-show (word " moving toward " destination " a distance of " patches-can-travel " patches.") ]
+   RUN-MONITOR 1 (word " moving toward " destination " a distance of " patches-can-travel " patches.")
    
    ; Whale should now keep moving until the total movement is equal to its maximum hourly travel distance.
    ; *** LATER ADD A WAY TO BREAK OUT OF THIS LOOP IF FODO IS FOUND -- ALSO A PROBABILISTIC VARIATION FROM THE ROUTE.
@@ -623,7 +624,7 @@ to toward-destination
    ]
    
    if patch-here = destination [
-     if RUN-MONITOR-LEVEL > 1 [file-show (word " reached destination " destination) ]
+     RUN-MONITOR 1 (word " reached destination " destination)
      set current-path nobody 
      set destination nobody
    ]
@@ -640,7 +641,7 @@ end
 ;; ===================================== NON-MOVING WHALE BEHAVIOR PROCEDURES =====================================
 ; CONTEXT: One whale (should be a group leader)
 to rest
-  if RUN-MONITOR-LEVEL > 1 [file-show  " is resting"]
+  RUN-MONITOR 1 " is resting"
   ask group [set last-rest -1]                 ; whales are resting. At the end of this time step, it will be set to 0 time units since they last rested. 
 end
 
@@ -1026,8 +1027,8 @@ OUTPUT
 283
 685
 1078
-726
-14
+736
+33
 
 SWITCH
 -2
@@ -1047,7 +1048,7 @@ SWITCH
 455
 shade-by-prey-density
 shade-by-prey-density
-1
+0
 1
 -1000
 
@@ -1106,21 +1107,6 @@ Prey list numbers:\n0=Adult Seal   1=Juvenile\n2=Sea Lion      3=Juvenile\n4=Gra
 1
 
 SLIDER
-3
-295
-175
-328
-region-width
-region-width
-50
-200
-60
-10
-1
-NIL
-HORIZONTAL
-
-SLIDER
 2
 330
 174
@@ -1129,7 +1115,7 @@ days-per-period
 days-per-period
 10
 100
-54
+100
 2
 1
 NIL
@@ -1142,7 +1128,7 @@ SWITCH
 403
 show-regions
 show-regions
-1
+0
 1
 -1000
 
@@ -1475,7 +1461,7 @@ Polygon -7500403 true true 270 75 225 30 30 225 75 270
 Polygon -7500403 true true 30 75 75 30 270 225 225 270
 
 @#$#@#$#@
-NetLogo 5.0.3
+NetLogo 5.0.4
 @#$#@#$#@
 @#$#@#$#@
 @#$#@#$#@

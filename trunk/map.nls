@@ -1,4 +1,4 @@
-; Matthew Dickerson
+; Matthew Dickerson & Thomas Dickerson
 ; with Karla Wentz
 ; This file contains the basic code for loading in an environment map, including the global constants related to the world and the patches-own variables
 
@@ -10,8 +10,10 @@ globals [
   ; The following variables hold frequently used subsets of patches that meet certain conditions. This prevents the program from constanstly
   ; asking all patches to evaluate some reporter
   water         ; will hold all water patches -- patches with (water? = true)
-  inland        ; will hold all inland (not offshore) patches of water -- the subset of water such that (inland? = true)
-  coast         ; will hold all coastal patches -- the subset of inland such that (coastal? = true)
+  coast         ; will hold all coastal patches -- the subset of water such that (coastal? = true)
+  shore
+  vd-vertices
+  vd-edges
   
   
   ; GLOBALS SET ACCORDING TO THE IMPORTED MAP (MAP-IMAGE) -- will change depending on the image
@@ -26,6 +28,12 @@ globals [
   ur-long-lat
   ll-long-lat 
   lr-long-lat 
+  
+  ocean-seed
+  land-seed
+  
+  land-upper-threshold
+  water-lower-threshold
 
   percent-done
   
@@ -39,7 +47,6 @@ globals [
 patches-own [
   water?        ; true for all patches containing any ocean, this it includes coastal? patches.
   coastal?      ; true if this patch contains a mix of ocean and land; these are a subset of water? and are assumed navigable by whales
-  inland?       ; true if this patch is not "off-shore" -- this is an approximation, but rough corresponds to having open water in some direction.
   visited?      ; used for various searches
 
   ; shore-dist is a measure of how far out to see a given water patch is -- a sort of distance to the nearest patch that is coast but adjacent to non-coast. 
@@ -49,8 +56,11 @@ patches-own [
   ;;  *** NEW VD INFO ***
   region
   nearest-land
-  edge?
-  vertex?
+  vd-edge?
+  vd-vertex?
+  
+  ;; for testing
+  init-color
   
   ;; node-info
   nearest-node  ; number of nearest node
@@ -58,7 +68,49 @@ patches-own [
 ]
 
 to SETUP-MONITOR [x y]
+  if SETUP-MONITOR-LEVEL > x [show y]
 end
+
+
+to load-map-parameters [map-file-name]
+  file-open map-file-name
+  
+  let map-img-name file-read
+  import-pcolors map-img-name
+  ask patches [set init-color pcolor mod 10]
+  
+  let km-dims file-read
+  
+  set km-width item 0 km-dims
+  set km-height item 1 km-dims
+  set kmpp (km-width / world-width)
+  
+  set ul-long-lat file-read
+  set ur-long-lat file-read
+  set ll-long-lat file-read
+  set lr-long-lat file-read
+  
+  let ocean-seed-ll file-read
+  set ocean-seed convert-long-lat (item 0 ocean-seed-ll) (item 1 ocean-seed-ll)
+  if (ocean-seed = nobody) [ DEBUG-MONITOR 1 "ERROR: ocean seed outside world" ]
+  
+  let land-seed-ll file-read
+  set land-seed convert-long-lat (item 0 land-seed-ll) (item 1 land-seed-ll)
+  if (land-seed = nobody) [ DEBUG-MONITOR 1 "ERROR: land seed outside world" ]
+  
+  set land-seed map [round ?] land-seed
+  set ocean-seed map [round ?] ocean-seed
+  
+  set land-upper-threshold file-read
+  set water-lower-threshold file-read
+  
+  ;SETUP-MONITOR 1 "Showing seed coordinates"
+  ;show ocean-seed
+  ;show land-seed
+  
+  file-close
+end
+
 
 to load-map
   SETUP-MONITOR 0 "Loading world map."
@@ -67,16 +119,17 @@ to load-map
   set show-nodes? false            ; Set this to true if you want to see the underlying graph used for whale movement
   
   ; Load the map and initialize the distance variables
-  import-pcolors "se.jpg"
-  set km-width 662.080654
-  set km-height 405.310276
-  set kmpp (km-width / world-width)
-  
-  ; These values are based on the map in "se.jpg".  If we change that map, these will have to be changed.
-  set ul-long-lat [-135.014846 60.115329]
-  set ur-long-lat [-128.616363 55.256646]
-  set ll-long-lat [-140.415989 57.774812]
-  set lr-long-lat [-133.732217 53.189382]
+  ;import-pcolors "se.jpg"
+  ;set km-width 662.080654
+  ;set km-height 405.310276
+  ;set kmpp (km-width / world-width)
+  ;
+  ;; These values are based on the map in "se.jpg".  If we change that map, these will have to be changed.
+  ;set ul-long-lat [-135.014846 60.115329]
+  ;set ur-long-lat [-128.616363 55.256646]
+  ;set ll-long-lat [-140.415989 57.774812]
+  ;set lr-long-lat [-133.732217 53.189382]
+  load-map-parameters "se-map-data.txt"
   
   ; Find out which patches are water, and among those which are coastal, create a patchset of all the water patches, for later efficiency
   SETUP-MONITOR 1 "Identifying water patches..."
@@ -85,7 +138,7 @@ to load-map
   
   ; We can now create a patchset of all the coast and inland patches, for later efficiency
   ; Any patch bordering a land patch, even if it is 100% water, should also be considered coastal. Get a list of coastal waters.
-  SETUP-MONITOR 1 "Identifying coastal patches..."
+  SETUP-MONITOR 1 "Identifying additional coastal patches..."
   ask water [
     ifelse any? neighbors with [not water?][
       set coastal? true 
@@ -95,26 +148,12 @@ to load-map
     ]
   ]
   set coast water with [coastal?]
- 
-  ; compute the inland water patches (as opposed to the off-shore patches)
-  ; All coastal patches are considered inland?  Anything else that is to the right of any land patch should be considered inland.
-  SETUP-MONITOR 0 "Identifying inland (vs. offshore) patches..."
-  ask water [ifelse not coastal? [set inland? false][set inland? true]]      ; We call coastal patches inland, even if they face off-shore
-  find-inland-patches  
-    
+   
   SETUP-MONITOR 0 "Eliminating isolated water..."
   eliminate-ponds       ; Unmark patches that are water, but not connected to the ocean, so that sea creatures are not initialized there.
   ask water [set shore-dist 1]
 
-  set water patches with [water?]
-  set coast water with [coastal?]
-  set inland water with [inland?]
-  
-  ; set the distance from each water patch to the nearest coastal patch, and color water accordingly -- darker is farther from shore.
-  ; set-distance-at-sea-l2
-;  set-distance-at-sea
-  set-distance-in
-  
+ 
   show-scale
   show-north
 end
@@ -125,22 +164,21 @@ end
 ; Map should be gray-scale, with black=land and white=water and grey a max.  In NetLogo, black is pcolor 0.0, and white is pcolor 9.9
 to extract-water-info
  ask patches [
-    set edge? false
-    set vertex? false
+    set vd-edge? false
+    set vd-vertex? false
     
     ; Usually, 0.0 is black and 9.9 is white, but NetLogo sometimes gives x9.9 for white and x0 black where x is some other digit.  Fix this.
     if pcolor >= 10 [ ifelse (remainder pcolor 10 = 0) [set pcolor black][set pcolor white]]   
     ; All patches should now have a pcolor in the range 0..9.9, showing the percent of that patch that is water.
     
     ; Any patch with pcolor <= 2 is at least 80 % land; set it to land and color it light green
-    ifelse (pcolor <= 2) [
+    ifelse (pcolor <= land-upper-threshold) [
       set pcolor green + 2           ;  Land patches (at most 20% water)
       set water? false
       set coastal? false
-      set inland? false
     ][                                ; All remaining patches have at least 20% water.
       set water? true                 ; Check to see if they are coastal (less than 100% water)
-      ifelse pcolor < white [
+      ifelse pcolor < (white - water-lower-threshold) [
         set coastal? true
         set pcolor yellow
       ][
@@ -149,31 +187,6 @@ to extract-water-info
       ]
     ]
   ]
-end
-
-; Identify (as a rough estimate for now) the patches that part of inland waterways, and label them by setting inland? to be true.  
-to find-inland-patches 
-  ; In the orientation of the default map, any coastal patch or any patch that is to the right of any land patch is considered inland
-  ; We loop from y=0 to y=max-pycor, and with a nested loop find the leftmost patch for each y that has land, and set all water to the right of that as inland
-  let y 0
-  while [y <= max-pycor][
-    let x 0
-    let found? false
-    while [x <= max-pxcor][                 ; NOTE: We use an inner loop instead of "ask patches" for reasons of efficiency
-      ifelse (not [water?] of patch x y) [  ; check if patch x y is water. If not, all water to the right can now be marked as inland?
-         set found? true                    ; found a land patch at this y coordinate
-      ][
-         ifelse found? [
-           ask patch x y [set inland? true]  ; if land was found to the left, then set this water patch to inland, otherwise to false
-         ][
-           ask patch x y [set inland? false]
-         ]
-      ] 
-      set x x + 1                          ; update loop indices for nested loops
-    ]
-    set y y + 1
-  ]
-  ask coast [set inland? true]
 end
 
 ; Calculates the distance from each coast patch to the nearest non-coast water patch to be stored as a negative number in shore-dist. 
@@ -204,19 +217,20 @@ to set-distance-in
 end
 
 ; This procedure gets rid of all the water that is not connected to the ocean. 
-; It starts with a patch that is not-inland, and then marks as visited? every patch that can be reached from this
+; It starts with a patch that is known to be ocean, and then marks as visited? every patch that can be reached from this
 ; starting patch traveling only on water.  At the end, patches that were not visited are marked as not water? and are
 ; removed from the water, coast, and inland patch sets.
 ; Assumes that inland patches have already been found
 to eliminate-ponds
   ask water [set visited? false]                            ; initial all water as unvisited
-  let seed one-of patches with [water? and not inland?]     ; pick a starting patch (seed) known not to be a pond (landlocked body of water)
+  let seed patch (item 0 ocean-seed) (item 1 ocean-seed)     ; pick a starting patch (seed) known not to be a pond (landlocked body of water)
   ask seed [set visited? true]                              ; the seed is now visited
   let to-process (list seed)                                ; to-process contains patches that have been visited, but from which neighbors have not been visited 
   while [length to-process > 0][                            ; from each visited patch in to-process, look for more unvisited water patches that are adjacent
      let next first to-process                              ; get the front-most patch from the to-process list
-     set to-process but-first to-process                
-     ask [neighbors] of next [                              ; visit any unvisited neighbors, and add those neighbors to the list to be processed
+     set to-process but-first to-process 
+     ; Make sure we don't slice through a thin section of island               
+     ask [neighbors4] of next [                              ; visit any unvisited neighbors, and add those neighbors to the list to be processed
         if water? and not visited? [
            set visited? true
            set to-process lput self to-process
@@ -229,11 +243,9 @@ to eliminate-ponds
     set pcolor green + 2
     set water? false
     set coastal? false
-    set inland? false
   ]
   ; remove the landlocked water patches from the global lists 
   set water water with [water?]
-  set inland water with [inland?]
   set coast coast with [coastal?]
 end
 
@@ -426,13 +438,13 @@ end
 to recolor-patches-by-depth
   ask patches with [not water?][
     set pcolor green + 2
-    if ((pxcor mod region-width = 0) or (pycor mod region-width = 0)) [set pcolor black]
+;    if ((pxcor mod region-width = 0) or (pycor mod region-width = 0)) [set pcolor black]
   ]
   ask coast [set pcolor white]
   let max-sd [shore-dist] of max-one-of water [shore-dist]
   ask water with [not coastal?][ 
     set pcolor scale-color blue shore-dist (max-sd * 1.2) (-.2 * max-sd) 
-    if ((pxcor mod region-width = 0) or (pycor mod region-width = 0)) [set pcolor black]
+;    if ((pxcor mod region-width = 0) or (pycor mod region-width = 0)) [set pcolor black]
   ]
 end
 
@@ -483,18 +495,21 @@ to compute-vd
   SETUP-MONITOR 1 "Marking and labeling islands."
   ask patches [set region -1]                   ; initialization all patches to null region.
   regionalize-land                              ; identify each distinct region and number/color all its patches
-  merge-isolated-islands                        ; find islands of size 1 and merge them into larger adjacent islands
+;  merge-isolated-islands                        ; find islands of size 1 and merge them into larger adjacent islands
   
    ; breaking the VD into two stages makes it more efficient as the non-inland patches can be evaluated with fewer comparisons.
-  label-inland                                  ; compute the VD information for inland water patches                
-  label-atsea                                   ; compute the VD information for non-inland water patches
+;;  label-inland                                  ; compute the VD information for inland water patches                
+;;  label-atsea                                   ; compute the VD information for non-inland water patches
+  label-water
   
   ; Shrink shore finds islands separated by other islands with a strip of water 1-patch wide, and it widens that strip 
   ; to allow two distinct Voronoi edge, one for each region.
   ; shrink-shore                                ; COMMENTED OUT AS THE NODE-APPROACH DOES NOT REQUIRE THIS
 
   ; Identify which water patches are Voronoi edges and which are Voronoi vertices
+  SETUP-MONITOR 1 "Identifying Voronoi features (edges)"
   find-edges
+  SETUP-MONITOR 1 "Identifying Voronoi features (vertices)"
   find-vertices
   
   if not voronoi-color-mode? [recolor-patches-by-depth]
@@ -506,12 +521,12 @@ end
 to regionalize-land
   ; Get initial list of all land patches and initialize them as not belonging to any region.  Edge patches are ignored.
   SETUP-MONITOR 1 "Make list of land patches."
-  let land-list patches with [not water? and count neighbors = 8]
+  let land-list patches with [not water?]; and count neighbors = 8]
   
   ; Number each region of land, starting with number 0 (the mainland)
   SETUP-MONITOR 1 "Dividing land into regions"
   let next-region 0   
-  let seed patch (min-pxcor + 1) (max-pycor - 1)   ; Upper left corner is part of mainland, and should be part of region 0
+  let seed patch (item 0 land-seed) (item 1 land-seed) ;(min-pxcor + 1) (max-pycor - 1)   ; Upper left corner is part of mainland, and should be part of region 0
   ask seed [
     set region next-region 
     set pcolor (region * 10 + 5)
@@ -524,7 +539,8 @@ to regionalize-land
        set this-region but-first this-region 
        ask next [                                  ; Process the patch as follows...
          ; print ( word "Adding " self " to region" )
-         ask neighbors4 with [region = -1 and not water? and count neighbors = 8][
+         ; land connects by neighbors, water connects by neighbors4
+         ask neighbors with [region = -1 and not water?][; and count neighbors = 8][
            set region next-region 
            set pcolor (region * 10 + 5)
            set this-region lput self this-region
@@ -547,118 +563,107 @@ to regionalize-land
   ]  
 end
 
-; Compute the VD on all the inland water patches. That is, label each such patch with the ID of the nearest land, and color it.
-; Note that this compares the distance of EVERY inland water patch with EVERY shoreline patch -- that is all the patches of land adjacent to water.
-to label-inland
+; Compute the VD on all water patches. That is, label each such patch with the ID of the nearest land, and color it.
+to label-water
   ; KEEP TRACK OF THE WORK BEING DONE FOR PROGRESS UPDATE
-  let done 0
-  let N count inland
+  SETUP-MONITOR 1 "Marking and labeling patches"
   
   ; Find all land patches adjacent to water. These will be used by water patches to (more efficiently) find the nearest shoreline, without measuring distance to all land.
   let shoreline patches with [(region >= 0) and (any? neighbors with [water? and shore-dist >= 0])]
   
-  ; Ask all inland water patches to find the nearest island, but finding the nearest shoreline land patch.
-  ask inland [
-    ; if shore-dist <= 0, the patch is adjacent to land... 
-    ifelse shore-dist <= 0 [     ; ... and the nearest land must be a neighbor, which is more efficient than computing distances to all land patches       
-       set nearest-land min-one-of neighbors with [not water?] [distance myself]
-   ][                            ; patch not adjacent to land, so compute distance to all shoreline land patches and find minimum
-      set nearest-land min-one-of shoreline [distance myself]
-      set shore-dist distance nearest-land
-    ]
-    set region [region] of nearest-land
-    set pcolor region * 10 + 7.5
+  let label-queue []
+  ask water [ set visited? false ]
+  ask shoreline [ set label-queue lput self label-queue ]
+  
+  while [not empty? label-queue] [
+   let p first label-queue
+   set label-queue but-first label-queue
+   ask [neighbors4] of p [
+     if water? and not visited? [
+       set label-queue lput self label-queue
+       let best-neighbor nobody
+       ifelse shore-dist <= 0 [
+         set nearest-land p
+         set best-neighbor p
+       ][
+;;;;;;; Commented region produces L1 diagram instead of L2
+;         set best-neighbor p
+;         set nearest-land [nearest-land] of best-neighbor
+;         set shore-dist distance nearest-land
+         set best-neighbor min-one-of neighbors with [water? and visited?] [[distance myself] of nearest-land]
+         ;ifelse best-neighbor = nobody [
+         ;  set best-neighbor p
+         ;  set nearest-land p
+         ;] [
+           set nearest-land [nearest-land] of best-neighbor
+         ;]
+         set shore-dist distance nearest-land
+       ]
+       set region [region] of best-neighbor
+       set pcolor region * 10 + 7.5
+       set visited? true
+       
+     ]  
    ]  
+  ]   
 end
 
-; Compute the VD on all the inland water patches. That is, label each such patch with the ID of the nearest land, and color it.
-to label-atsea
-  SETUP-MONITOR 1 "Marking and labeling non-inland water."
-  
-  let atsea water with [not inland?]                ; remaining water patches to be labeled
- 
-  ; To make this more efficient, we want to avoid computing the distance of EVERY water patch with EVERY shoreline patch.
-  ; Since all coastal patches are considered "inland", there are no non-inland patches adjacent to the shore.
-  ; This means that all regions with non-inland patches must contain at least one inland patch adjacent to a non-inland patch. We can use this to identify
-  ; which regions are candidates for containing a non-inland patch, and thus reduce the number of distance computations.
-  let possible-regions nobody
-  ask inland with [any? neighbors with [water? and not inland?]][          ; For each inland patch adjance to non-inland patch, find its nearest land patch as a candidate.
-    set possible-regions (patch-set possible-regions nearest-land)
-  ]
-  
-  let done 0
-  let N count atsea                                 ; Used for update the status of this procedure
-  
-  ask atsea [                                       ; For all non-inland patches, compute the nearest land patch from among the candidates computed above
-    set nearest-land min-one-of possible-regions [distance myself]
-    set shore-dist distance nearest-land
-    set region [region] of nearest-land
-    set pcolor region * 10 + 7.5
-  ]
-end
 
-; Identify all water patches that are boundaries of a Voronoi region as edge? patches. 
+; Identify all water patches that are boundaries of a Voronoi region as vd-edge? patches. 
 ; Note that if two land-masses are separated by a single pixel, then one of them will not have an edge in-between.
 to find-edges
+  ;set vd-edges (patch-set)
   ask water [
     ifelse any? neighbors with [region != [region] of myself] [
-      set edge? true
+      set vd-edge? true
       ; set pcolor black
     ][
-      set edge? false
+      set vd-edge? false
+      ;set vd-edges (patch-set self vd-edges)
     ]
   ]
+  set vd-edges water with [vd-edge?] ; apparently agentsets are slow to update
 end
 
 ; Identify Voronoi vertices for each region -- these are patches adjoining at least two other regions.
 ; Vertices are subsets of edges.
 to find-vertices
+  ;set vd-vertices (patch-set)
   ask water [
-    set vertex? false
-    if edge? [
+    set vd-vertex? false
+    if vd-edge? [
       let found? false
-      let nn neighbors with [water? and edge? and (region != [region] of myself)]
+      let nn neighbors with [water? and vd-edge? and (region != [region] of myself)]
       if any? nn [
         let v one-of nn
         if any? nn with [region != [region] of v ] [set found? true]
       ]
-      if found? [
-        set vertex? true 
+      if found? and not any? neighbors with [vd-vertex?] [
+        set vd-vertex? true 
+        ;set vd-vertices (patch-set self vd-vertices)
         ; set pcolor white
       ]
     ]
   ]
+  set vd-vertices water with [vd-vertex?] ; apparently agentsets are slow to update
 end
 
 
-; This procedure identifies land patches that are not adjacent to any other land patches. 
-; To simplify the VD, these are renumbered/relabeled of as "rocks" attached to the nearest island, rather than as islands in their own right.
-to merge-isolated-islands
-  ask patches with [not water? and not any? neighbors with [not water? and region = [region] of myself]][
-     let nearby-other neighbors with [not water? and region != [region] of myself] 
-     ifelse any? nearby-other [
-        set region [region] of one-of nearby-other
-        set pcolor region * 10 + 5
-        SETUP-MONITOR 2  (word "No longer a separate island region. Merged with region " region)
-     ][
-        SETUP-MONITOR 2  "Is a one-patch island not adjacent to any other islands."
-     ]
-  ]
-end
-
-to shrink-shore
-  ask patches with [not water? and any? neighbors with [water? and region != [region] of myself]][
-     set water? true
-     set coastal? true
-     set inland? true
-     set shore-dist 0
-     set nearest-land min-one-of neighbors with [not water? and region = [region] of myself][distance myself]
-     set edge? true
-     set vertex? false
-     set pcolor region * 10 + 7.5
-     show "Converted from land/shore to water/shore and Voronoi edge."
-  ]
-end
+;; This procedure identifies land patches that are not adjacent to any other land patches. 
+;; To simplify the VD, these are renumbered/relabeled of as "rocks" attached to the nearest island, rather than as islands in their own right.
+;to merge-isolated-islands
+;  SETUP-MONITOR 1 "Merging isolated islands"
+;  ask patches with [not water? and not any? neighbors with [not water? and region = [region] of myself]][
+;     let nearby-other neighbors with [not water? and region != [region] of myself] 
+;     ifelse any? nearby-other [
+;        set region [region] of one-of nearby-other
+;        set pcolor region * 10 + 5
+;        SETUP-MONITOR 2  (word "No longer a separate island region. Merged with region " region)
+;     ][
+;        SETUP-MONITOR 2  "Is a one-patch island not adjacent to any other islands."
+;     ]
+;  ]
+;end
 
 ;; === END OF VORONOI DIAGRAM SECTION ================
 
@@ -716,27 +721,58 @@ to make-nodes
   let min-anchor-dist 35          ; Initially make sure that all nodes are farther apart than this
   let highest-y 500               ; Don't put nodes above this position as they are only fjords with no passages
   
-  ; All possible water patches that might hold graph nodes
-  let possible-node-list (water with [(shore-dist <= max-sd) and (pycor < highest-y) and (region != bc1) and (region != bc2)]) 
-  
   ; Start with special anchor nodes at Voronoi vertices -- but not too dense. 
-  ask patch 590 238 [make-anchor-here]
-  ask patch 512 201 [make-anchor-here]
-  ask patch 684 181 [make-anchor-here]
-  ask possible-node-list [
-    if vertex? and not any? nodes in-radius min-anchor-dist [make-anchor-here]
+;  ask patch 590 238 [make-anchor-here]
+;  ask patch 512 201 [make-anchor-here]
+;  ask patch 684 181 [make-anchor-here]
+;  ask patch 284 459 [make-anchor-here]
+;  ask patch 316 492 [make-anchor-here]
+;  ask patch 394 473 [make-anchor-here]
+  ask vd-vertices [
+    if not any? nodes in-radius min-anchor-dist [make-anchor-here]
   ]
   SETUP-MONITOR 1 (word (count nodes) " anchors were created.")
   
-  ; Add non-anchor nodes, more densely near the shore. Initially, a node should be 3x farther from another node than it is from shore
-  ask possible-node-list with [shore-dist > 0] [
-    if not any? nodes in-radius (shore-dist * 3) [make-node-here]
+  let candidate-edges vd-edges with [(shore-dist <= max-sd) and (shore-dist > 0) and (pycor < highest-y) and (region != bc1) and (region != bc2)]
+  ask n-of ((count candidate-edges) / 5) candidate-edges[
+    if not any? nodes in-radius ((max (list 2 shore-dist)) ^ 1.05) [make-node-here] 
   ]
+  SETUP-MONITOR 1  (word (count nodes with [not anchor?]) " edge nodes were created.")
+  
+;;  ; Add non-anchor nodes, more densely near the shore. Initially, a node should be 3x farther from another node than it is from shore
+;;  ; All possible water patches that might hold graph nodes
+;;  let possible-node-set (water with [(shore-dist <= max-sd) and (shore-dist > 0) and (pycor < highest-y) and (region != bc1) and (region != bc2)])
+  
+;;  ; Take nodes and sort by distance from shore
+;;  let possible-node-list sort-on [shore-dist] (n-of ((count possible-node-set)) possible-node-set)
+;;  
+;;  ;let target-node-count (count water) / 300
+;;  let available-count length possible-node-list
+;;  show (word available-count " possible node locations")
+;;  let per-partition available-count / 5
+;;  let partition-num 0
+;;  repeat 5 [
+;;    ; take 5 evenly spaced segments
+;;   let current-partition (sublist possible-node-list (partition-num * per-partition) (min (list available-count ((partition-num + 1) * per-partition))) )
+;;   let mean-dist mean (map [[shore-dist] of ?] current-partition)
+;;   SETUP-MONITOR 1 (word mean-dist " average shore distance in partition " partition-num)
+;;   foreach n-of (per-partition / (12 * mean-dist * mean-dist)) current-partition [ 
+;;     ask ? [make-node-here]
+;;   ]
+;;   set partition-num partition-num + 1
+;;  ]
+  
+;  show (word (count possible-node-list) " possible node locations for " target-node-count " desired nodes.")
+;  ask possible-node-list with [shore-dist > 0] [
+;  ; This is O(n^2) in the number of nodes
+;  ; We should be able to do better!
+;    if not any? nodes in-radius (shore-dist * 3) [make-node-here]
+;  ]
   
   ; These two additional nodes are required to make a graph with a desired passage.
-  ask patch 325 480 [make-node-here]
-  ask patch 331 479 [make-node-here]
-  SETUP-MONITOR 1  (word (count nodes with [not anchor?]) " non-anchor nodes were created.")
+;  ask patch 325 480 [make-node-here]
+;  ask patch 331 479 [make-node-here]
+  SETUP-MONITOR 1  (word (count nodes with [not anchor?]) " non-anchor nodes were created (including edges).")
 end
 
 ; Now add edges.  Anchors should be connected to all other anchors for which there is a straight-line path across water.
@@ -744,15 +780,19 @@ end
 to make-edges
   SETUP-MONITOR 0  "Creating graph edges"
   ; Link all visible anchors with a single link
-  ask nodes with [anchor?][  
-    let other-anchors other nodes with [anchor?]     
-    ask other-anchors [if (not link-neighbor? myself) and (segment-on-water? pxcor pycor [pxcor] of myself [pycor] of myself) 
+  let anchors nodes with [anchor?]
+  ask anchors[      
+    ask other anchors [if (not link-neighbor? myself) and (segment-on-water? pxcor pycor [pxcor] of myself [pycor] of myself) 
        [create-link-with myself [set color red if not show-nodes? [set hidden? true]]]] 
   ]
   
   ; Create a sparse around of edges among other nodes. Link each node to visible neighbors among the five closest neighbors.
-  ask nodes [
-    let closest-neighbors min-n-of 5 other nodes [distance myself]
+  ask nodes [ ; with [not anchor?] [
+;    let closest-neighbors (other nodes in-radius max (list 100 (8 * shore-dist)))
+;    if (count closest-neighbors) > 5 [
+;      set closest-neighbors min-n-of 5 closest-neighbors [distance myself]
+;    ]
+    let closest-neighbors min-n-of 6 other nodes [distance myself]
     ask closest-neighbors [
       if (not link-neighbor? myself) and (segment-on-water? pxcor pycor [pxcor] of myself [pycor] of myself) 
           [create-link-with myself [set color white if not show-nodes? [set hidden? true]]]
@@ -787,7 +827,7 @@ end
 ; Any node that is not connected to basic node graph (that includes the open water nodes) should be removed.
 to remove-disconnected-nodes
   SETUP-MONITOR 0  "Removing disconnected nodes."
-  ask one-of nodes with [not inland?][
+  ask max-one-of nodes with [anchor?] [count my-links][ ; assume anchor of highest degree is connected
      set color yellow
      mark-connected-yellow 
   ]
@@ -1142,20 +1182,24 @@ to-report visit [p vpl reverse?]
 end
 
 ; A variant of the find-line algorithm that simply reports false if the directed segment from (x1,y1) to (x2,y2) passes through a non-water patch,
-; and true otherwise
+; and true otherwise.  There is one special case where the two reporters are different. This reports false if the path passes directly through the
+; corner between four patches if two of those patches are land -- assuming that whales could not travel there.
 to-report segment-on-water? [x1 y1 x2 y2]
-  
+
+  DEBUG-MONITOR 2 (word "Call to reporter segment-on-water? for segment: (" x1 "," y1 ") (" x2 ","  y2 ").")
+
   ; Special case where all the patches crossed by the line have the same pxcor
   if round x1 = round x2 [
+    DEBUG-MONITOR 2 (word "Special case. All crossed patches have the same x-coordinate.")
     ; find the starting patch--the patch containing the coordinate (x1,y1)
     let cur-y round y1
     let cur-x round x1
-    
+
     ; determine whether the line segment goes up or down
     let inc 1
     if y2 < y1 [set inc -1]
-    
-    ; visit all the patches intersected by the segment 
+
+    ; visit all the patches intersected by the segment
     while [cur-y != round y2][
       if not [water?] of patch cur-x cur-y [report false]
       set cur-y (cur-y + inc)
@@ -1163,12 +1207,12 @@ to-report segment-on-water? [x1 y1 x2 y2]
     if not [water?] of patch cur-x cur-y [report false]
     report true
   ]
-  
+
   ; Now hand the other cases, where the starting pxcor is different from the final pxcor
-  
+
   ; Determine if line moves left to right or right to left.
-  ; If right to left, then set reverse? = true and patches will be visited in the reverse order    
-  let reverse? false                 
+  ; If right to left, then set reverse? = true and patches will be visited in the reverse order
+  let reverse? false
   if x1 > x2 [
     set reverse? true
     let temp x1
@@ -1178,77 +1222,222 @@ to-report segment-on-water? [x1 y1 x2 y2]
     set y1 y2
     set y2 temp
   ]
-  
-  ; Find the change in x, change in y, and slope of the segment,  
+
+  ; Find the change in x, change in y, and slope of the segment,
   ; Note that the slope cannot be infinity or it would have been handled in the special case above
   let delta-x (x2 - x1)
   let delta-y (y2 - y1)
   let slope (delta-y / delta-x)
-  
+
   ; (cur-x,cur-y) is the actual integer patch coordinate of the current patch being visited, starting with
-  ; the first endpoint of the segment
+  ; the first endpoint of the segment.  We keep updating (cur-x,cur-y) and then testing patch cur-x cur-y.
   let cur-x (round x1)
   let cur-y (round y1)
+  DEBUG-MONITOR 2 (word "Testing patch at initial endpoint (" cur-x ", "cur-y ").")
   if not [water?] of patch cur-x cur-y [report false]      ; Visit the starting patch
 
   ; y-int is the y coordinate of where this line will cross into the next column of patches
   ; Find the first y-int
   let xd ((cur-x + .5) - x1)      ; xd is the x-distance from x1 to the next column
   let y-int (y1 + xd * slope)     ; (cur-x + .5, y-int) is a coordinate where the line crosses a column
-      
-  ; If y1 > y2, then the slope is negative and each successive patch is lower than the previous one
-  ifelse y1 <= y2 [    
+
+  ; Test if slope is positive, or negative
+  ; If y1 <= y2, then the slope is 0 or positive, and each patch looked at high higher or to the right of the previous one
+  ; If y1 > y2, then the slope is negative and each successive patch is lower or to the right of the previous one
+  ifelse y1 <= y2 [
+    DEBUG-MONITOR 2 "Segment has non-negative slope."
     while [y-int > (cur-y + .5)][   ; visit all the intersected patches with the starting pxcor
       set cur-y (cur-y + 1)
       if not [water?] of patch cur-x cur-y [report false]
-    ] 
-    
+      DEBUG-MONITOR 2 (word "Testing patches with initial x-cor " cur-x ", " cur-y)
+    ]
+
     ; keep incrementing cur-x by 1 and visiting all intersected patches until column before x2
     set cur-x (cur-x + 1)                              ; update the current column
-    if (y-int = cur-y + .5)[ set cur-y (cur-y + 1)]    ; the line goes through a corner of 4 patches
+
+    ; Special case for when the line goes through a corner of 4 patches
+    if (y-int = cur-y + .5)[
+      DEBUG-MONITOR 2 (word "Segment going through a corner between (" (cur-x - 1) "," (cur-y + 1)") and (" cur-x "," cur-y ").")
+      if ((not [water?] of patch (cur-x - 1) (cur-y + 1)) and (not [water?] of patch cur-x cur-y)) [report false]
+      set cur-y (cur-y + 1)
+    ]
     set y-int (y-int + slope)                          ; compute the next y-intercept
     while [cur-x < (round x2)][                        ; loop through all values of cur-x until x2
+      DEBUG-MONITOR 2 (word "Testing next x-cor " cur-x ", " cur-y)
       if not [water?] of patch cur-x cur-y [report false]
       ; loop through all pycors of intersected patches at the current x-cor
-      while [(y-int > (cur-y + .5)) and (y2 > (cur-y + .5))][                      
+      while [(y-int > (cur-y + .5)) and (y2 > (cur-y + .5))][
         set cur-y (cur-y + 1)
-        if not [water?] of patch cur-x cur-y [report false]
+       DEBUG-MONITOR 2 (word "Testing patch " cur-x ", " cur-y)
+       if not [water?] of patch cur-x cur-y [report false]
       ]
       set cur-x (cur-x + 1)                              ; update to the final column
-      if (y-int = cur-y + .5)[ set cur-y (cur-y + 1)]    ; find the max pycor to be visited
-      set y-int (y-int + slope)       
+      ; Special case for when the line goes through a corner of 4 patches
+      if (y-int = cur-y + .5)[
+        DEBUG-MONITOR 2 (word "Segment going through a corner between (" (cur-x - 1) "," (cur-y + 1)") and (" cur-x "," cur-y ").")
+        if ((not [water?] of patch (cur-x - 1) (cur-y + 1)) and (not [water?] of patch cur-x cur-y)) [report false]
+        set cur-y (cur-y + 1)
+      ]
+      set y-int (y-int + slope)
     ]
-    
+
     while [(cur-x < (x2 + .5)) and (cur-y < (y2 + 0.5))][
+      DEBUG-MONITOR 2 (word "Testing patches with final x-cor " cur-x ", " cur-y)
       if not [water?] of patch cur-x cur-y [report false]
       set cur-y (cur-y + 1)
     ]
   ][ ; SYMMETRIC TO THE ABOVE FOR DOWNSLOPING SEGMENTS
-     while [y-int < (cur-y - .5)][
+    DEBUG-MONITOR 2 "Segment has negative slope."
+    while [y-int < (cur-y - .5)][
       set cur-y (cur-y - 1)
+      DEBUG-MONITOR 2 (word "Testing patches with initial x-cor " cur-x ", " cur-y)
       if not [water?] of patch cur-x cur-y [report false]
-    ] 
+    ]
     set cur-x (cur-x + 1)
-    if (y-int = cur-y - .5)[ set cur-y (cur-y - 1)]
+    ; Special case for when the line goes through a corner of 4 patches
+    if (y-int = cur-y - .5)[
+      DEBUG-MONITOR 2 (word "Segment going through a corner between (" (cur-x - 1) "," (cur-y - 1) ") and (" cur-x "," cur-y ").")
+      if ((not [water?] of patch (cur-x - 1) (cur-y - 1)) and (not [water?] of patch cur-x cur-y)) [report false]
+      set cur-y (cur-y - 1)
+    ]
+
     set y-int (y-int + slope)
     while [cur-x < (round x2)][
+      DEBUG-MONITOR 2 (word "Testing next x-cor " cur-x ", " cur-y)
       if not [water?] of patch cur-x cur-y [report false]
       while [(y-int < (cur-y - .5)) and (y2 < (cur-y - .5))][
         set cur-y (cur-y - 1)
+        DEBUG-MONITOR 2 (word "Testing patch " cur-x ", " cur-y)
         if not [water?] of patch cur-x cur-y [report false]
       ]
       set cur-x (cur-x + 1)
-      if (y-int = cur-y - .5)[ set cur-y (cur-y - 1)]
-      set y-int (y-int + slope)       
+      if (y-int = cur-y - .5)[
+        DEBUG-MONITOR 2 (word "Segment going through a corner between (" (cur-x - 1) "," (cur-y - 1) ") and (" cur-x "," cur-y ").")
+        if ((not [water?] of patch (cur-x - 1) (cur-y - 1)) and (not [water?] of patch cur-x cur-y)) [report false]
+        set cur-y (cur-y - 1)
+      ]
+      set y-int (y-int + slope)
     ]
     while [(cur-x < (x2 + .5)) and (cur-y > (y2 - 0.5))][
+      DEBUG-MONITOR 2 (word "Testing patch with final x-cor " cur-x ", " cur-y)
       if not [water?] of patch cur-x cur-y [report false]
       set cur-y (cur-y - 1)
-    ]  
+    ]
   ]
-  
+
   ; If the procedures reaches this point, then it has tested the entire segment and not passed through a non-water patch
   report true
 end
 
+to color-voronoi-regions
+  ask patches [set pcolor voronoi-region-color]
+end
 
+to color-hunting-regions
+  ask patches [set pcolor hunting-region-color]
+end
+
+to-report hunting-region
+  report [id] of ([nearest-anchor] of nearest-node)
+end
+
+to-report voronoi-region-color
+  if water? [report region * 10 + 7.5]
+  report region * 10 + 5
+end
+
+to-report hunting-region-color
+  if water? [report hunting-region * 10 + 7.5]
+  report green - 2
+end
+
+to identify-shoreline
+  set shore patches with [(not water?) and (count (neighbors with [coastal?])) > 0]
+  ask shore [set pcolor black]
+  ask coast [set pcolor white]
+end
+
+to-report shore-pair-normal-angle [shore-pair]
+  let coastal-patch item 0 shore-pair
+  let shore-patch item 1 shore-pair
+  let delx (([pxcor] of coastal-patch) - ([pxcor] of shore-patch))
+  let dely (([pycor] of coastal-patch) - ([pycor] of shore-patch))
+  report atan delx dely ; remember that sin is +x and cos is +y. i.e. theta=0 points along +y, and +theta is CW!
+end
+
+; For dir: CW is +1
+;          CCW is -1
+; Remember that the cw and ccw naming here will
+; be reversed on a -1
+to-report inc-shore [shore-pair dir]
+  let coastal-patch item 0 shore-pair
+  let shore-patch item 1 shore-pair
+  DEBUG-MONITOR 1 (word coastal-patch shore-patch)
+  let cx [pxcor] of coastal-patch
+  let cy [pycor] of coastal-patch
+  let sx [pxcor] of shore-patch
+  let sy [pycor] of shore-patch
+  let sr [region] of shore-patch
+
+  let theta shore-pair-normal-angle shore-pair
+  let theta-cw ((theta + (dir * 45)) mod 360)
+  
+  let next-patch patch (sx + (sin theta-cw)) (sy + (cos theta-cw))
+  ifelse next-patch = nobody [
+    ; We've wandered off the edge of the map
+    set coastal-patch nobody
+    set shore-patch nobody
+  ] [ 
+    let nx1 [pxcor] of next-patch
+    let ny1 [pycor] of next-patch
+    ifelse ([water?] of next-patch) [
+      let ntheta-ccw ((theta-cw + (dir * 135)) mod 360) ; Reverse the vector between shore and next-patch and swing 45 ccw
+      set coastal-patch next-patch
+      ; Should end up here for flat or convex coastline
+      ; See if we can swing the land pointer up to match!
+      let next-shore-patch patch (nx1 + (sin ntheta-ccw)) (ny1 + (cos ntheta-ccw))
+      set shore-patch ifelse-value ((next-shore-patch = nobody) or ([water?] of next-shore-patch) or (not (sr = ([region] of next-shore-patch)))) [shore-patch][next-shore-patch]
+    ] [
+      let ntheta-ccw ((theta + (dir * 135)) mod 360) ; Reverse the vector between shore and coastal, and swing 45 ccw
+      let test-patch patch (cx + (sin ntheta-ccw)) (cy + (cos ntheta-ccw))
+      ; We're in a corner, make sure we don't skip in anybody
+      ifelse (sr = ([region] of next-patch)) [
+        set shore-patch ifelse-value ((test-patch = nobody) or ([water?] of test-patch) or (test-patch = next-patch) or (not (sr = ([region] of test-patch)))) [next-patch][test-patch]
+      ] [
+        set coastal-patch test-patch
+      ]
+      ;if ([water?] of shore-patch)[
+      ;  DEBUG-MONITOR 1 "Eek, shore landed on water"
+      ;]
+    ]
+  ]
+  report (list coastal-patch shore-patch)
+  
+end
+
+to-report find-a-shore [coastal-patch]
+
+  if (not ([coastal?] of coastal-patch)) [
+    DEBUG-MONITOR 1 (word coastal-patch " is not a coastal patch")
+  ]
+  report (list coastal-patch (one-of ([neighbors] of coastal-patch) with [not water?]) )
+end
+
+to color-a-shore [coastal-patch]
+  let cs-pair find-a-shore coastal-patch
+  let i 0
+  while [(i < 120) and not (cs-pair = [nobody nobody])] [
+    ask (item 0 cs-pair) [set pcolor red - 2]
+    ask (item 1 cs-pair) [set pcolor orange - 2]
+    set cs-pair inc-shore cs-pair 1
+    set i i + 1
+  ]
+  set i 0
+  set cs-pair find-a-shore coastal-patch
+  while [(i < 120) and not (cs-pair = [nobody nobody])] [
+    ask (item 0 cs-pair) [set pcolor red + 2]
+    ask (item 1 cs-pair) [set pcolor orange + 2]
+    set cs-pair inc-shore cs-pair -1
+    set i i + 1
+  ]
+end
