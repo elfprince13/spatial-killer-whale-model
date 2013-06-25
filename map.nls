@@ -119,16 +119,6 @@ to load-map
   set show-nodes? false            ; Set this to true if you want to see the underlying graph used for whale movement
   
   ; Load the map and initialize the distance variables
-  ;import-pcolors "se.jpg"
-  ;set km-width 662.080654
-  ;set km-height 405.310276
-  ;set kmpp (km-width / world-width)
-  ;
-  ;; These values are based on the map in "se.jpg".  If we change that map, these will have to be changed.
-  ;set ul-long-lat [-135.014846 60.115329]
-  ;set ur-long-lat [-128.616363 55.256646]
-  ;set ll-long-lat [-140.415989 57.774812]
-  ;set lr-long-lat [-133.732217 53.189382]
   load-map-parameters "se-map-data.txt"
   
   ; Find out which patches are water, and among those which are coastal, create a patchset of all the water patches, for later efficiency
@@ -152,7 +142,6 @@ to load-map
   SETUP-MONITOR 0 "Eliminating isolated water..."
   eliminate-ponds       ; Unmark patches that are water, but not connected to the ocean, so that sea creatures are not initialized there.
   ask water [set shore-dist 1]
-
  
   show-scale
   show-north
@@ -538,7 +527,7 @@ to regionalize-land
        let next first this-region                  ; Pull from the queue the next land patch to be added to this region
        set this-region but-first this-region 
        ask next [                                  ; Process the patch as follows...
-         ; print ( word "Adding " self " to region" )
+         SETUP-MONITOR 3 ( word "Adding " self " to region" )
          ; land connects by neighbors, water connects by neighbors4
          ask neighbors with [region = -1 and not water?][; and count neighbors = 8][
            set region next-region 
@@ -586,17 +575,8 @@ to label-water
          set nearest-land p
          set best-neighbor p
        ][
-;;;;;;; Commented region produces L1 diagram instead of L2
-;         set best-neighbor p
-;         set nearest-land [nearest-land] of best-neighbor
-;         set shore-dist distance nearest-land
          set best-neighbor min-one-of neighbors with [water? and visited?] [[distance myself] of nearest-land]
-         ;ifelse best-neighbor = nobody [
-         ;  set best-neighbor p
-         ;  set nearest-land p
-         ;] [
-           set nearest-land [nearest-land] of best-neighbor
-         ;]
+         set nearest-land [nearest-land] of best-neighbor
          set shore-dist distance nearest-land
        ]
        set region [region] of best-neighbor
@@ -612,23 +592,21 @@ end
 ; Identify all water patches that are boundaries of a Voronoi region as vd-edge? patches. 
 ; Note that if two land-masses are separated by a single pixel, then one of them will not have an edge in-between.
 to find-edges
-  ;set vd-edges (patch-set)
   ask water [
     ifelse any? neighbors with [region != [region] of myself] [
       set vd-edge? true
-      ; set pcolor black
     ][
       set vd-edge? false
-      ;set vd-edges (patch-set self vd-edges)
     ]
   ]
-  set vd-edges water with [vd-edge?] ; apparently agentsets are slow to update
+  
+  ; apparently agentsets are slow to update, so actually faster to do it all at the end
+  set vd-edges water with [vd-edge?]
 end
 
 ; Identify Voronoi vertices for each region -- these are patches adjoining at least two other regions.
 ; Vertices are subsets of edges.
 to find-vertices
-  ;set vd-vertices (patch-set)
   ask water [
     set vd-vertex? false
     if vd-edge? [
@@ -640,30 +618,13 @@ to find-vertices
       ]
       if found? and not any? neighbors with [vd-vertex?] [
         set vd-vertex? true 
-        ;set vd-vertices (patch-set self vd-vertices)
-        ; set pcolor white
       ]
     ]
   ]
-  set vd-vertices water with [vd-vertex?] ; apparently agentsets are slow to update
+  
+  ; apparently agentsets are slow to update, so actually faster to do it all at the end
+  set vd-vertices water with [vd-vertex?]
 end
-
-
-;; This procedure identifies land patches that are not adjacent to any other land patches. 
-;; To simplify the VD, these are renumbered/relabeled of as "rocks" attached to the nearest island, rather than as islands in their own right.
-;to merge-isolated-islands
-;  SETUP-MONITOR 1 "Merging isolated islands"
-;  ask patches with [not water? and not any? neighbors with [not water? and region = [region] of myself]][
-;     let nearby-other neighbors with [not water? and region != [region] of myself] 
-;     ifelse any? nearby-other [
-;        set region [region] of one-of nearby-other
-;        set pcolor region * 10 + 5
-;        SETUP-MONITOR 2  (word "No longer a separate island region. Merged with region " region)
-;     ][
-;        SETUP-MONITOR 2  "Is a one-patch island not adjacent to any other islands."
-;     ]
-;  ]
-;end
 
 ;; === END OF VORONOI DIAGRAM SECTION ================
 
@@ -721,13 +682,6 @@ to make-nodes
   let min-anchor-dist 35          ; Initially make sure that all nodes are farther apart than this
   let highest-y 500               ; Don't put nodes above this position as they are only fjords with no passages
   
-  ; Start with special anchor nodes at Voronoi vertices -- but not too dense. 
-;  ask patch 590 238 [make-anchor-here]
-;  ask patch 512 201 [make-anchor-here]
-;  ask patch 684 181 [make-anchor-here]
-;  ask patch 284 459 [make-anchor-here]
-;  ask patch 316 492 [make-anchor-here]
-;  ask patch 394 473 [make-anchor-here]
   ask vd-vertices [
     if not any? nodes in-radius min-anchor-dist [make-anchor-here]
   ]
@@ -738,41 +692,6 @@ to make-nodes
     if not any? nodes in-radius ((max (list 2 shore-dist)) ^ 1.05) [make-node-here] 
   ]
   SETUP-MONITOR 1  (word (count nodes with [not anchor?]) " edge nodes were created.")
-  
-;;  ; Add non-anchor nodes, more densely near the shore. Initially, a node should be 3x farther from another node than it is from shore
-;;  ; All possible water patches that might hold graph nodes
-;;  let possible-node-set (water with [(shore-dist <= max-sd) and (shore-dist > 0) and (pycor < highest-y) and (region != bc1) and (region != bc2)])
-  
-;;  ; Take nodes and sort by distance from shore
-;;  let possible-node-list sort-on [shore-dist] (n-of ((count possible-node-set)) possible-node-set)
-;;  
-;;  ;let target-node-count (count water) / 300
-;;  let available-count length possible-node-list
-;;  show (word available-count " possible node locations")
-;;  let per-partition available-count / 5
-;;  let partition-num 0
-;;  repeat 5 [
-;;    ; take 5 evenly spaced segments
-;;   let current-partition (sublist possible-node-list (partition-num * per-partition) (min (list available-count ((partition-num + 1) * per-partition))) )
-;;   let mean-dist mean (map [[shore-dist] of ?] current-partition)
-;;   SETUP-MONITOR 1 (word mean-dist " average shore distance in partition " partition-num)
-;;   foreach n-of (per-partition / (12 * mean-dist * mean-dist)) current-partition [ 
-;;     ask ? [make-node-here]
-;;   ]
-;;   set partition-num partition-num + 1
-;;  ]
-  
-;  show (word (count possible-node-list) " possible node locations for " target-node-count " desired nodes.")
-;  ask possible-node-list with [shore-dist > 0] [
-;  ; This is O(n^2) in the number of nodes
-;  ; We should be able to do better!
-;    if not any? nodes in-radius (shore-dist * 3) [make-node-here]
-;  ]
-  
-  ; These two additional nodes are required to make a graph with a desired passage.
-;  ask patch 325 480 [make-node-here]
-;  ask patch 331 479 [make-node-here]
-  SETUP-MONITOR 1  (word (count nodes with [not anchor?]) " non-anchor nodes were created (including edges).")
 end
 
 ; Now add edges.  Anchors should be connected to all other anchors for which there is a straight-line path across water.
@@ -786,12 +705,8 @@ to make-edges
        [create-link-with myself [set color red if not show-nodes? [set hidden? true]]]] 
   ]
   
-  ; Create a sparse around of edges among other nodes. Link each node to visible neighbors among the five closest neighbors.
-  ask nodes [ ; with [not anchor?] [
-;    let closest-neighbors (other nodes in-radius max (list 100 (8 * shore-dist)))
-;    if (count closest-neighbors) > 5 [
-;      set closest-neighbors min-n-of 5 closest-neighbors [distance myself]
-;    ]
+  ; Create a sparse around of edges among other nodes. Link each node to visible neighbors among the six closest neighbors.
+  ask nodes [
     let closest-neighbors min-n-of 6 other nodes [distance myself]
     ask closest-neighbors [
       if (not link-neighbor? myself) and (segment-on-water? pxcor pycor [pxcor] of myself [pycor] of myself) 
@@ -1190,7 +1105,7 @@ to-report segment-on-water? [x1 y1 x2 y2]
 
   ; Special case where all the patches crossed by the line have the same pxcor
   if round x1 = round x2 [
-    DEBUG-MONITOR 2 (word "Special case. All crossed patches have the same x-coordinate.")
+    DEBUG-MONITOR 3 (word "Special case. All crossed patches have the same x-coordinate.")
     ; find the starting patch--the patch containing the coordinate (x1,y1)
     let cur-y round y1
     let cur-x round x1
@@ -1233,7 +1148,7 @@ to-report segment-on-water? [x1 y1 x2 y2]
   ; the first endpoint of the segment.  We keep updating (cur-x,cur-y) and then testing patch cur-x cur-y.
   let cur-x (round x1)
   let cur-y (round y1)
-  DEBUG-MONITOR 2 (word "Testing patch at initial endpoint (" cur-x ", "cur-y ").")
+  DEBUG-MONITOR 3 (word "Testing patch at initial endpoint (" cur-x ", "cur-y ").")
   if not [water?] of patch cur-x cur-y [report false]      ; Visit the starting patch
 
   ; y-int is the y coordinate of where this line will cross into the next column of patches
@@ -1245,7 +1160,7 @@ to-report segment-on-water? [x1 y1 x2 y2]
   ; If y1 <= y2, then the slope is 0 or positive, and each patch looked at high higher or to the right of the previous one
   ; If y1 > y2, then the slope is negative and each successive patch is lower or to the right of the previous one
   ifelse y1 <= y2 [
-    DEBUG-MONITOR 2 "Segment has non-negative slope."
+    DEBUG-MONITOR 3 "Segment has non-negative slope."
     while [y-int > (cur-y + .5)][   ; visit all the intersected patches with the starting pxcor
       set cur-y (cur-y + 1)
       if not [water?] of patch cur-x cur-y [report false]
@@ -1257,24 +1172,24 @@ to-report segment-on-water? [x1 y1 x2 y2]
 
     ; Special case for when the line goes through a corner of 4 patches
     if (y-int = cur-y + .5)[
-      DEBUG-MONITOR 2 (word "Segment going through a corner between (" (cur-x - 1) "," (cur-y + 1)") and (" cur-x "," cur-y ").")
+      DEBUG-MONITOR 3 (word "Segment going through a corner between (" (cur-x - 1) "," (cur-y + 1)") and (" cur-x "," cur-y ").")
       if ((not [water?] of patch (cur-x - 1) (cur-y + 1)) and (not [water?] of patch cur-x cur-y)) [report false]
       set cur-y (cur-y + 1)
     ]
     set y-int (y-int + slope)                          ; compute the next y-intercept
     while [cur-x < (round x2)][                        ; loop through all values of cur-x until x2
-      DEBUG-MONITOR 2 (word "Testing next x-cor " cur-x ", " cur-y)
+      DEBUG-MONITOR 3 (word "Testing next x-cor " cur-x ", " cur-y)
       if not [water?] of patch cur-x cur-y [report false]
       ; loop through all pycors of intersected patches at the current x-cor
       while [(y-int > (cur-y + .5)) and (y2 > (cur-y + .5))][
         set cur-y (cur-y + 1)
-       DEBUG-MONITOR 2 (word "Testing patch " cur-x ", " cur-y)
+       DEBUG-MONITOR 3 (word "Testing patch " cur-x ", " cur-y)
        if not [water?] of patch cur-x cur-y [report false]
       ]
       set cur-x (cur-x + 1)                              ; update to the final column
       ; Special case for when the line goes through a corner of 4 patches
       if (y-int = cur-y + .5)[
-        DEBUG-MONITOR 2 (word "Segment going through a corner between (" (cur-x - 1) "," (cur-y + 1)") and (" cur-x "," cur-y ").")
+        DEBUG-MONITOR 3 (word "Segment going through a corner between (" (cur-x - 1) "," (cur-y + 1)") and (" cur-x "," cur-y ").")
         if ((not [water?] of patch (cur-x - 1) (cur-y + 1)) and (not [water?] of patch cur-x cur-y)) [report false]
         set cur-y (cur-y + 1)
       ]
@@ -1282,44 +1197,44 @@ to-report segment-on-water? [x1 y1 x2 y2]
     ]
 
     while [(cur-x < (x2 + .5)) and (cur-y < (y2 + 0.5))][
-      DEBUG-MONITOR 2 (word "Testing patches with final x-cor " cur-x ", " cur-y)
+      DEBUG-MONITOR 3 (word "Testing patches with final x-cor " cur-x ", " cur-y)
       if not [water?] of patch cur-x cur-y [report false]
       set cur-y (cur-y + 1)
     ]
   ][ ; SYMMETRIC TO THE ABOVE FOR DOWNSLOPING SEGMENTS
-    DEBUG-MONITOR 2 "Segment has negative slope."
+    DEBUG-MONITOR 3 "Segment has negative slope."
     while [y-int < (cur-y - .5)][
       set cur-y (cur-y - 1)
-      DEBUG-MONITOR 2 (word "Testing patches with initial x-cor " cur-x ", " cur-y)
+      DEBUG-MONITOR 3 (word "Testing patches with initial x-cor " cur-x ", " cur-y)
       if not [water?] of patch cur-x cur-y [report false]
     ]
     set cur-x (cur-x + 1)
     ; Special case for when the line goes through a corner of 4 patches
     if (y-int = cur-y - .5)[
-      DEBUG-MONITOR 2 (word "Segment going through a corner between (" (cur-x - 1) "," (cur-y - 1) ") and (" cur-x "," cur-y ").")
+      DEBUG-MONITOR 3 (word "Segment going through a corner between (" (cur-x - 1) "," (cur-y - 1) ") and (" cur-x "," cur-y ").")
       if ((not [water?] of patch (cur-x - 1) (cur-y - 1)) and (not [water?] of patch cur-x cur-y)) [report false]
       set cur-y (cur-y - 1)
     ]
 
     set y-int (y-int + slope)
     while [cur-x < (round x2)][
-      DEBUG-MONITOR 2 (word "Testing next x-cor " cur-x ", " cur-y)
+      DEBUG-MONITOR 3 (word "Testing next x-cor " cur-x ", " cur-y)
       if not [water?] of patch cur-x cur-y [report false]
       while [(y-int < (cur-y - .5)) and (y2 < (cur-y - .5))][
         set cur-y (cur-y - 1)
-        DEBUG-MONITOR 2 (word "Testing patch " cur-x ", " cur-y)
+        DEBUG-MONITOR 3 (word "Testing patch " cur-x ", " cur-y)
         if not [water?] of patch cur-x cur-y [report false]
       ]
       set cur-x (cur-x + 1)
       if (y-int = cur-y - .5)[
-        DEBUG-MONITOR 2 (word "Segment going through a corner between (" (cur-x - 1) "," (cur-y - 1) ") and (" cur-x "," cur-y ").")
+        DEBUG-MONITOR 3 (word "Segment going through a corner between (" (cur-x - 1) "," (cur-y - 1) ") and (" cur-x "," cur-y ").")
         if ((not [water?] of patch (cur-x - 1) (cur-y - 1)) and (not [water?] of patch cur-x cur-y)) [report false]
         set cur-y (cur-y - 1)
       ]
       set y-int (y-int + slope)
     ]
     while [(cur-x < (x2 + .5)) and (cur-y > (y2 - 0.5))][
-      DEBUG-MONITOR 2 (word "Testing patch with final x-cor " cur-x ", " cur-y)
+      DEBUG-MONITOR 3 (word "Testing patch with final x-cor " cur-x ", " cur-y)
       if not [water?] of patch cur-x cur-y [report false]
       set cur-y (cur-y - 1)
     ]
@@ -1406,9 +1321,9 @@ to-report inc-shore [shore-pair dir]
       ] [
         set coastal-patch test-patch
       ]
-      ;if ([water?] of shore-patch)[
-      ;  DEBUG-MONITOR 1 "Eek, shore landed on water"
-      ;]
+      if ([water?] of shore-patch)[
+        DEBUG-MONITOR 1 "Eek, shore landed on water, something is wrong"
+      ]
     ]
   ]
   report (list coastal-patch shore-patch)
