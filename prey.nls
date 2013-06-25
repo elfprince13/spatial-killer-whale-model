@@ -1,0 +1,254 @@
+; GLOBAL COUNTERS AND DATA STRUCTURES FOR PREY
+; num-prey-types - The number of species or distinct subspecies of prey, where each species has several age classes. 
+;                - It is also therefore the number of fields in prey-data, seasons-data, distribution-counts and num-seasons. 
+;                - The prey types (species) have a global ordering and appear in the same ordering in each list.
+
+; hunting-data   - A 3D structure (list of lists) 
+;                -- hunting-data[i][j] contains a list for age class j for prey type i.  
+;                -- Each such list corresponds to one class of prey that whales can hunt and contains information about 
+;                   that prey class needed to determine hunting success and energy, etc.  
+;                -- The items in each list are indexed using the constants NAME#, CLASS#, GLOBAL-POP#, etc.  See constants file.
+; prey-data      -a 2D structure (list of lists) holding the data specific to an entire species or distinct population
+;                -- The items in each list are indexed using the constants NAME#, NUM-CLASSES# BIRTHMAX# BIRTHA# BIRTHB#
+; prey-data[i][NUM-CLASSES#] holds the number of age classes for prey type i.  This is always at least 2: AF and AM.  
+
+globals [
+  hunting-data             ; A 3D structure (list of lists)   
+  prey-data                ; a 2D list holding the data specific to an entire species or distinct population
+  num-prey-types           ; the number of lists in prey-data 
+  
+  disbursement
+  best-hunting-grounds
+]
+
+patches-own [
+  prey-counts        ; a list of lists of the numbers of the different types of prey, in the same order as the hunting-data list
+                     ; prey-counts [i][j] contains the count of age-class j of prey-type i at this location.
+  sea-lions          ; a list of the number of stellar sea lions on this patch, ordered by the subpopulations
+  prey-hiding        ; Number of time steps until prey come out of hiding. Set to 0 if prey on this patch are not aware of hunting KWs.
+]
+
+
+;; ================================= PREY LOADING AND INITIALIZATION PROCEDURES AND REPORTERS =========================
+
+; CONTEXT: Observer
+; Initializes the environment with a population of prey species
+to init-prey
+  ask patches [
+    set prey-hiding 0           ; currently no patches have prey aware of KWs.    
+    set prey-counts (list)      ; the count of the number of prey of each type on this patch, with prey always listed in the same order 
+  ]
+  init-prey-constants
+  load-hunting-data
+end
+
+
+; This procedure reads the files containing the data needed for the hunting-data and prey-data lists that contain data about prey species
+; and age classes
+to load-hunting-data
+  set hunting-data (list)       ; One list of lists for each prey
+  set num-prey-types 0          ; The total number of different species or distinct populations, which is also the number of lists in prey-data
+  set prey-data (list)          ; Data that pertains to an entire species, and not just an age class
+  init-distribution-structures 
+  
+  load-data "harbor-seals.txt"
+  load-seasonal-distributions "seal-seasons.txt" "Harbor Seals" 0 
+  
+  load-data "ssl.txt"
+  load-seasonal-distributions "ssl-seasons.txt" "Steller Sea Lions"  1 
+end
+
+; Load the hunting data file for a particular species, which includes age-class and prey data -- except for geographic season disbursal.
+to load-data [prey-file-name]
+  file-open prey-file-name
+  let classes-count 0           ; Keeps track of the number of age classes. 
+  ; Note that the third age class shoudl be of the form "Jx" where x is an integer representing the largest juvenile age class. x+2 should be total number of classes.
+  
+  ; The first line in the file corresponds to adult females and contains 17 items
+  ; The second line corresponds to adult males and contains 14 items
+  ; Each subsequent line is an age class and contains 14 items
+ 
+  let name file-read                                 
+  let class-name file-read
+  if class-name != "AF" [ print (word "ERROR READING FILE " prey-file-name ": unexpected age class on first line; should be AF.") ]
+  let species-list (load-adult-female name class-name)
+  set classes-count 1
+  
+  let temp-name file-read
+  if temp-name != name [ print (word "ERROR READING FILE " prey-file-name ": first two lines do not have same species name.")]
+  set class-name file-read 
+  if class-name != "AM" [ print (word "ERROR READING FILE " prey-file-name ": unexpected age class on second line; should be AM") ]
+  load-class-data name class-name
+  set classes-count 2
+    
+  set temp-name file-read
+  if temp-name != name [ print (word "ERROR READING FILE " prey-file-name ": two lines do not have same species name.")]
+  set class-name file-read 
+  let oldest-class-label class-name
+  let oldest-class-int read-from-string (item 1 oldest-class-label)    ; The age of the oldest juvenile class. Compare with classes-count at the end.
+  while [class-name != "J0"][
+    load-class-data name class-name
+    set classes-count (classes-count + 1)
+    set temp-name file-read
+    if temp-name != name [ print (word "ERROR READING FILE " prey-file-name ": first two lines do not have same species name.")]
+    set class-name file-read 
+  ]
+  load-class-data name class-name
+  set classes-count (classes-count + 1)
+  
+  if (classes-count != (oldest-class-int + 3)) [
+     print (word "ERROR READING FILE " prey-file-name ": The oldest juvenile class was " oldest-class-label " but the number of loaded classes was " classes-count)
+  ]
+  file-close    
+
+  ;; all the data has been entered.  Update the number of classes for this prey type, and the total number of prey types
+  set species-list (replace-item NUM-CLASSES# species-list classes-count)
+  set prey-data (lput species-list prey-data) 
+  set num-prey-types (num-prey-types + 1)
+  
+  ; Initialize the prey-counts fields in all water patches so they are the correct length.
+  let temp-list (list )
+  repeat classes-count [set temp-list (lput 0 temp-list)]
+  ask water [set prey-counts (lput temp-list prey-counts)]
+end
+
+; Assumes the first two items on this file line (name and age-class) have been read. Reads in the rest and loads into hunting-data array and prey-data array
+to-report load-adult-female [name class-name]
+  let global-pop file-read                            
+  let birthing-date file-read                          
+  let start-mass file-read
+  let end-mass file-read
+  let kcal-per-gram file-read                      
+  let surv-max file-read                           
+  let survA file-read                                
+  let survB  file-read                                
+  let birth-max file-read                             
+  let birthA  file-read                          
+  let birthB file-read                            
+  let e-rate file-read                   
+  let vuln-max   file-read                           
+  let vulnA  file-read                                
+  let vulnB  file-read                               
+  
+  ; Now create lists with this data in the correct order, 
+  let new-hunting-data (list name "AF" global-pop birthing-date start-mass end-mass kcal-per-gram 
+                             surv-max survA survB e-rate vuln-max vulnA vulnB)
+  let new-prey-data (list name 1 birth-max birthA birthB)
+  
+  ; Add these lists to the hunting-data and prey-data master list of lists 
+  set hunting-data (lput (list new-hunting-data) hunting-data)
+  
+  report new-prey-data
+end
+
+
+; Assumes the first two items on this file line (name and age-class) have been read. Reads in the rest and loads into hunting-data array and prey-data array
+to load-class-data [name class-name]
+  let global-pop file-read                            
+  let birthing-date file-read                          
+  let start-mass file-read
+  let end-mass file-read
+  let kcal-per-gram file-read                        
+  let surv-max file-read                               
+  let survA file-read                                 
+  let survB  file-read                                
+  let e-rate file-read                         
+  let vuln-max   file-read                             
+  let vulnA  file-read                                
+  let vulnB  file-read                                
+  
+  ; Now create lists with this data in the correct order, 
+  let new-hunting-data (list name class-name global-pop birthing-date start-mass end-mass kcal-per-gram 
+                             surv-max survA survB e-rate vuln-max vulnA vulnB)
+  
+  let new-last-item (lput new-hunting-data (last hunting-data))
+  ; Add these lists to the hunting-data and prey-data master list of lists 
+  set hunting-data (lput new-last-item (but-last hunting-data))
+end
+
+; ---------------------PREY HUNTING REPORTERS (VULNERABILITY AND ENCOUNTER RATES, ETC)   --------------
+
+; report the vulnerability value (probability of getting killed in an encounter) for the prey-type with the given index for a group of whales of the given size
+; prey-type is an index holding  one of harbor-seals#, harbor-seals0#, dall-porpoises#, etc. 
+; group-size is the number of whales attacking
+to-report vulnerability [ prey-type group-size ]
+  let vulnA (item VULNA# (item prey-type hunting-data))
+  let vulnB (item VULNB# (item prey-type hunting-data) )
+  let vulnMax (item VULNMAX# (item prey-type hunting-data) )
+  let x exp (vulnA + vulnB * (group-size - 1))
+  report vulnMax * (x / (1 + x))
+end
+
+; report the encounter-rate (percentage of prey of the given type that will be encountered by whales) 
+; prey-type is an index holding  one of harbor-seals#, harbor-seals0#, dall-porpoises#, etc. 
+to-report encounter-rate [ prey-type ]
+   report (item ENCOUNTER-RATE# (item prey-type hunting-data))
+end
+
+; report the disbursement-rate for a given prey type (number of patches that have any of that prey) 
+; prey-type is an index holding  one of harbor-seals#, harbor-seals0#, dall-porpoises#, etc. 
+to-report disbursement-rate [ prey-type ]
+   report item prey-type disbursement
+end
+
+; CONTEXT:  ONE PATCH
+; Report the expected number of successful prey encounters (prey encountered and successfully hunted) for one prey of the given type and a group of the given size
+; This takes into account the encounter-rate and vulnerability of the given prey-type as well as spatial disbursement
+to-report expected-prey-encounters [prey-type class-num effective-group-size]
+    
+    let prey-count-here (item class-num (item prey-type prey-counts))         ; get the number of this prey-type present on this patch
+
+    ; Encounter rate is weighted for a global number of seals and for 24 hours. Need to scale up because we have only 1 patch
+    ; ** NOTE WE MAY NEED LATER TO SCALE AGAIN BASED ON TIME STEP, OR TO CHANGE DISBURSEMENT SCALE FACTOR
+    let avg-prey-encountered (encounter-rate prey-type) * prey-count-here * (2 * disbursement-rate prey-type) 
+    
+    ; Now turn the expected number of prey encountered into an expected number killed based on vulnerability to a group this size
+    let vuln (vulnerability prey-type effective-group-size)  ; get the vulernability of this prey-type
+    let avg-catch-size (avg-prey-encountered * vuln)
+    
+    report avg-catch-size
+end
+
+; patch reporter
+; Returns a number specifying the expected quality of hunting in this patch for a group of whales of the given size. 
+; A number > 1 justifies hunting with good probability of group success
+to-report food-rating [effective-group-size]
+   ; For each type of prey, multiple the number of prey of that type by its vulnerability, and sum over all prey types
+   let avail-qty 0
+   let prey-type 0
+   
+   ; Iterate through all prey types and add the expected catch of that type to the total expected catch
+   while [prey-type < num-prey-types][  
+     let class-num 0
+     while [class-num < (item NUM-CLASSES# (item prey-type prey-data))][                                           
+       set avail-qty (avail-qty + expected-prey-encounters prey-type class-num effective-group-size)     ; Number of prey of this type, times vulnerability
+       set prey-type (prey-type + 1)
+     ]
+   ]
+   
+   ; Scale down if prey are hiding
+   if prey-hiding > 0 [set avail-qty avail-qty * (1 - hiding-effectiveness)]       ; Lower the expected rating if prey are hiding
+
+   report avail-qty 
+end
+
+; Reports the current expected mass of the prey of the given prey-type based on the day number.
+; This is a linear scale from START-MASS to END-MASS over the length of one year from birth-date.
+to-report current-mass [prey-type]
+  let birthday (item BIRTHING-DATE# (item prey-type hunting-data))   ; date in which this prey jumped an age class
+  let extra-days (days - birthday)                                ; how many days into the age class is this prey?
+  if extra-days < 0 [set extra-days (extra-days + 365)]
+  let ratio (extra-days / 365)                                    ; linear scale from start weight to end weight
+  let start-wt (item START-MASS# (item prey-type hunting-data))
+  let end-wt (item END-MASS# (item prey-type hunting-data))
+  report start-wt + ratio * (end-wt - start-wt)
+end
+  
+; ---------------------PREY DYNAMICS  --------------
+to update-prey
+  ask patches [                   ; One fewer time steps until prey come out of hiding.
+    if prey-hiding > 0 [set prey-hiding (prey-hiding - 1)]
+  ]  
+end
+
+

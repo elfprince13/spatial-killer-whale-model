@@ -1,0 +1,364 @@
+; Matthew Dickerson
+; This file contains code for reading the prey distribution files and loading the data into the prey data structures. 
+
+; COUNTERS -- DEFINED IN ANOTHER FILE
+; num-prey-types - The number of species or distinct subspecies of prey, where each species has several age classes. 
+;                - It is also therefore the number of fields in prey-data, seasons-data, distribution-counts and num-seasons. 
+;                - The prey types (species) have a global ordering and appear in the same ordering in each list.
+; prey-data[i][NUM-CLASSES#] holds the number of age classes for prey type i.  This is always at least 2: AF and AM.  
+;
+; DATA STRUCTURES
+; num-seasons – A 1D structure: a list of the number of seasons for each prey type.
+;
+; seasons-data – A 2D structure (list of lists).
+;            - Each list contains the starting days of each season, in increasing order, for the prey-type of the given number.  
+;             The value in num-seasons[i] should contain the length of seasons-data[i]. The value of seasons-data[i][j] is the starting day of season [j] for prey type i.
+; NOTE: If the first season listed (season 0) begins with day > 0, then day 0 is part of the final season in the list.
+;
+; distribution-counts – A 2D structure (list of lists)
+;            -  Each list corresponds to the number of prey locations for the given prey type for the given season. 
+;            -  That is, distribution-counts[i][j] is the number of different locations for prey type i for season j.
+;
+;
+; distributions -- A 4D structure (list of lists of lists of lists) 
+;              - distributions[i][j][k] corresponds to the kth location for season j for prey type i. 
+;              - each location is a list of length c + 5 where c is the number of age classes
+;                  the list contains long lat age-class-percentages p-coastal coastal-sd offshore-sd 
+;              - distributions-counts[i][j] gives the length of list distributions[i][j][k].  
+;  
+
+globals [num-seasons  seasons-data distribution-counts distributions    ; See descriptions above
+]
+
+patches-own [test-value]
+
+to DEBUG-MONITOR [x y]
+end
+  
+; Initialize the seasonal prey distribution lists -- make data structures empty lists
+to init-distribution-structures 
+   set num-seasons (list )
+   set seasons-data (list )
+   set distribution-counts (list )
+   set distributions (list )
+end
+
+; seasons-file-name:  a string with the name of the file containing the data to be read.
+; species: a string with the name of the species whose data is contained in the file. Should be the first line of the file.
+; species-num: the number of this species in the various lists of species data.
+to load-seasonal-distributions [seasons-file-name species species-num]  
+  
+  ; Open the file and make sure it is of the expected species -- which is the first line of the file
+  file-open seasons-file-name         
+  read-distribution-file-header  seasons-file-name species
+  
+  
+  ; The second value in the file should be the number of seasons for this prey type.
+  ; Add this value to the end of the list of the number of seasons for all types of prey. Make sure the list is of the correct length.
+  let seasons-ct file-read            
+  set num-seasons (lput seasons-ct num-seasons)
+  if length num-seasons != (species-num + 1) [
+    print (word "ERROR READING DISTRIBUTION FILE " seasons-file-name ": Error in num-seasons. Entered species number " 
+                 species-num " but num-seasons has length " length num-seasons)
+    stop
+  ]  
+    
+  ; Get the list of start days for each of the seasons. The next seasons-ct values in the value should be the start days of the seasons.
+  ; Read these values from the file and store them in a list. Append that list to the seasons-data data structure.
+  let start-days (list )              
+  repeat seasons-ct [
+    let day-num file-read
+    set start-days (lput day-num start-days)
+  ]
+  set seasons-data (lput start-days seasons-data)
+  if length seasons-data != (species-num + 1) [
+    print (word "ERROR READING DISTRIBUTION FILE " seasons-file-name ": Error in seasons-data. Entered species number " 
+                 species-num " but seasons-data has length " length seasons-data)
+    stop
+  ]  
+  
+  
+  ; Get the list of the number of locations for each of the seasons. The next seasons-ct values in the value should be the number of locations for each of the seasons.
+  ; Read these values from the file and store them in a list. Append that list to the distribution-counts data structure.
+  let num-locations (list )           ; The number of locations to be assocated with each season
+  repeat seasons-ct [
+     let location-ct file-read
+     set num-locations (lput location-ct num-locations)
+  ]
+  set distribution-counts (lput num-locations distribution-counts)
+  if length seasons-data != (species-num + 1) [
+    print (word "ERROR READING DISTRIBUTION FILE " seasons-file-name ": Error in distribution-counts. Entered species number " 
+                   species-num " but distribution-counts has length " length distribution-counts)
+    stop
+  ] 
+  
+  ; --------------
+  ; Now we read the actual list of locations and the distribution values associated with each location from the file.
+  ; We use nested loops. 
+  ;     - The outer loop iterates through the number of seasons...
+  ;     - the next inner loop iterates through the number of locations for that seasons,...
+  ;     - and the innermost loop depends on the number of juvenile classes for the species. 
+  ; The number of lines of the file associated with each season is determined by num-locations list, and the number of seasons is in seasons-ct
+  
+  let num-classes item NUM-CLASSES# (item species-num prey-data)   ; Get the number of classes for this prey-type. This determines how long each record is.
+  
+  ; Loop through each season and get all the location data for that season, starting with season 0.
+  let season 0                                                  ; Loop counter
+  let all-season-locations (list )                              ; The list to hold all data for this prey-type (i.e. species)
+  while [season < seasons-ct] [                                 ; Outermost loop through all the seasons
+    let line file-read                                          ; Error check. The first line should be "Season n".
+    if substring line 0 6 != "Season" [
+       print (word "Distribution file structure error on " seasons-file-name ". Expecting Season at start of line.")
+       stop      
+    ]
+    
+    let this-season-locations (list )                           ; This list contains locations just for this season.
+    repeat item season num-locations [                          ; Inner loop iteratures through all the locations for this particular season for this prey-type
+      ; First two values are the (lat,long) pair giving the location
+      let this-location (list file-read)                        ; lat
+      set this-location (lput file-read this-location)          ; long
+      
+      ; Next is a list of values, one for each age-class, of the proportion of the total prey counts that goes in this location for this age class
+      repeat num-classes [
+        set this-location (lput file-read this-location)        ; age class distribution proportions
+      ]
+      
+      ; The final 3 numbers describe how prey are distributed around this location.
+      set this-location (lput file-read this-location)          ; p-coastal   -- the proportion that should go on coastal patches
+      set this-location (lput file-read this-location)          ; sd-coastal  -- distance in kms containing a standard deviation of the coastally distributed prey
+      set this-location (lput file-read this-location)          ; sd-offshore -- distance in kms containing a standard deviation of the off-shore distributed prey
+
+      set this-season-locations (lput this-location this-season-locations)
+    ]
+    set all-season-locations (lput this-season-locations all-season-locations)
+    set season season + 1
+  ]
+  set distributions (lput all-season-locations distributions)
+ 
+  file-close
+
+end
+
+; Used by the load-seasonal-distributions procedure above just to read and check the header of each file.
+to read-distribution-file-header [seasons-file-name species]  
+  let check-name file-read
+  if check-name != species [
+    print (word "ERROR READING DISTRIBUTION FILE " seasons-file-name ": Mismatched or incorrect file type for distribution. Expected " 
+                 species " on first line, but got " check-name ".")
+    stop
+  ]
+end
+
+
+; --------------------------------------------------------------------------------------
+; Reset to 0 the counts of all age classes of the given prey-type in all patches.
+; Store in the GLOBAL-POP# field of hunting-data the total number of prey found of all age classes of the given type. 
+to gather-and-count [prey-type]
+  
+end
+
+to RUN-MONITOR [x y]
+end
+
+; Distribute the total number of prey of all age-classes given in the GLOBAL-POP# field of hunting-data structure according to the
+; distrubution percentages given in the distribution-counts and distributions data structures for the season that includes the given day number.
+; Decrement from GLOBAL-POP# all distributed prey. If the total proportions at all locations is <1.0 then some prey should  remain in GLOBAL-POP# as off-world.
+to seasonal-distribution [prey-type day-of-year]
+  DEBUG-MONITOR 0 (word "Seasonal distribution for prey-type " prey-type ", " (item NAME# (item prey-type prey-data)) " on season including day " day-of-year) 
+  RUN-MONITOR 1 (word "Seasonal distribution for " (item NAME# (item prey-type prey-data)) " on day " day-of-year)
+  
+  ; Find the number of the season corresponding to the given day.
+  let season-index get-season-from-day prey-type day-of-year
+  DEBUG-MONITOR 1 (word "Prey-type " prey-type " has day " day-of-year " in season number " season-index) 
+
+  
+  ; Now distribute all of the prey-classes of the give prey-type according to the seasonal distribution for season numbered season-index
+  ; For each age class, loop through all locations for distribution
+
+  let ct-classes (item NUM-CLASSES# (item prey-type prey-data))               ; The number of age classes for this prey type
+  let ct-locations (item season-index (item prey-type distribution-counts))   ; The number of locations for distribution for this prey type an this season
+  DEBUG-MONITOR 2 (word "There are " ct-locations " locations for this prey type.")
+  
+  let class-num 0                                                      ; Index of the current age class to be processed
+  repeat ct-classes [                                                  ; Loop through all age classes for this type
+     let prey-list (item prey-type hunting-data)                       ; Extract from hunting data the list of data for this prey type
+     let class-list (item class-num prey-list)                         ; Extract from list of data for this prey type the list of data for this age class
+     let members (item GLOBAL-POP# class-list)                         ; Get the number of prey of this age class in the total population
+     DEBUG-MONITOR 2 (word "Distributing age class " class-num " with " members " individuals.")
+
+
+     let total-distributed 0                                           ; Keep track of how many prey of this class are distributed
+     let loc 0                                                         ; Index of the current location to be processed
+     ; Loop through all locations to distribute the numbers of prey of this age class
+     repeat ct-locations [                                             
+       let this-loc (item loc (item season-index (item prey-type distributions)))   ; distributions[i][j][k] is the kth location for season j for prey type i
+       ; list contains long lat age-class-percentages-for-all-age-classes p-coastal coastal-sd offshore-sd
+       let long (item 0 this-loc)
+       let lat (item 1 this-loc)
+       let central-patch long-lat-patch long lat
+       let len (length this-loc)
+       let p-coastal (item (len - 3) this-loc)
+       let coastal-sd (item (len - 2) this-loc)
+       let offshore-sd (item (len - 1) this-loc)
+       
+       let prop-here (item (class-num + 2) this-loc)                      ; Proportion of total population to distribute around this area for this age class
+       let num-here prop-here * members                                   ; Total number to go here based on percental of total population of this age class
+       let i-num-here (int num-here)                                      ; compute the integer version.
+       let frac (num-here - i-num-here)
+       if random-float 1.0 < frac [set i-num-here (i-num-here + 1)]       ; probabilistically round up or down
+       DEBUG-MONITOR 2 (word this-loc " will get " prop-here " of the total members of this age class, which is " i-num-here " individuals.")
+
+       
+       distribute central-patch prey-type class-num i-num-here p-coastal coastal-sd offshore-sd
+       set total-distributed (total-distributed + i-num-here)
+       set loc (loc + 1)
+     ]
+     set members (members - total-distributed)                            ; Must update the GLOBAL-POP# field for this prey. Should keep a count of undistributed prey.
+     set class-list replace-item GLOBAL-POP# class-list members
+     set prey-list replace-item class-num prey-list class-list 
+     set hunting-data replace-item prey-type hunting-data prey-list
+     set class-num (class-num + 1) 
+  ]
+end
+
+; Search the seasons-data structure for the prey of the given to find the index of the season containing the day of the given number.
+to-report get-season-from-day [prey-type day-of-year]
+  ; Get the index of the season number that contains day-of-year in the seasons-data structure. 
+  let seasons-ct (item prey-type num-seasons)
+  let season-index (seasons-ct - 1)   
+  ; If the first season listed (season 0) begins with day > 0, then day 0 is part of the final season in the list.
+  ; Otherwise, loop backwards through the seasons to find the latest season that does not start after the given day-of-year
+  if day-of-year > (item 0 (item prey-type seasons-data)) [
+    while [day-of-year <= (item season-index (item prey-type seasons-data))][
+      set season-index (season-index - 1)
+    ]
+  ]
+  report season-index
+end
+
+;;  DISTRIBUTE PREY AROUND A GIVEN PATCH WITH DENSITY IN A NORMAL/GUASSIAN DISTRIBUTION
+; p is the patch around which prey are to be distribution
+; pry is the number of the prey-type
+; cls is the number of the age-class of the given prey-type
+; n is an integer representing the total number to be distributed. When this procedure is done, the total of test-value for all patches should be n.
+; The total of test-value for coastal patches should be ~ n * p-coast.
+; The total of test-value for open-water patches should be ~ n * (1 - p-coast)
+; The total of test-value for coastal patches within distance sd-coast of p should be ~ 1 standard deviation of n * p-coast
+; The total of test-value for open-water patches within distance sd-water of p should be ~ 1 standard deviation of n * (1 - p-coast)
+
+to distribute [center-patch pry cls n p-coast sd-coast sd-water] 
+  DEBUG-MONITOR 1 (word "Distributing around patch " center-patch ", " n " individuals of prey-type " pry " and age-class " cls)
+  let sd-coast-p (sd-coast / kmpp)         ; sd value in patch units 
+  let sd-water-p (sd-water / kmpp)
+  
+  let f-on-coast (p-coast * n)             ; expected number that should go on a coastal patch
+  let on-coast int f-on-coast              ; integer truncation of this value
+  set f-on-coast (f-on-coast - on-coast)   ; remaining fractional portion of this value
+  if (random-float 1.0 < f-on-coast) [set on-coast (on-coast + 1)]
+  let off-coast (n - on-coast)
+  
+  ; Compute list of all patches that will be considered to receive prey distributed around p.
+  ; The list will contain pairs of (patch, water-distance)
+  let max-dist-away (K-DIST-MAX * max (list sd-coast-p sd-water-p))
+                     ; We will only consider patches within K-DIST-MAX * the great of the SD distances
+  DEBUG-MONITOR 1 (word "Computing all patches within " max-dist-away " patches of " center-patch)
+  let all-candidates ([water-patches-within-to-list max-dist-away] of center-patch)
+
+  ; Compute the sublists of such patches that are coastal and non-coastal
+  DEBUG-MONITOR 0 "Computing sublists of coastal and non-coastal candidates."
+  let coast-candidates filter [[coastal?] of first ?] all-candidates
+  let open-candidates filter [not [coastal?] of first ?] all-candidates
+  DEBUG-MONITOR 2 coast-candidates 
+  DEBUG-MONITOR 2 open-candidates
+  
+  
+  DEBUG-MONITOR 1 (word "Distributing " on-coast " prey on coast to " length coast-candidates " patches.")
+  ; For each patch-distance (p,d) pair in coast-candidates, add a third value which is the value of the Gaussian function of the distance d with the given standard deviation sd
+  let temp (list )                           ; A list of patches, distances, and proportions based on those distances
+  let total 0                                ; Keep track of total put on patches so far, to be sure that the exact number gets put out.
+  foreach coast-candidates [
+     let g gaussian (last ?) 0 sd-coast
+     set total (total + g)
+     let t (lput g ?)
+     set temp lput t temp
+  ]
+  DEBUG-MONITOR 1 (word "Patches and relative normal distribution densities: " temp)
+  set coast-candidates temp    ;  Now it is a list of doubles p, g where p is the patch and g the relative density
+  let n-remaining on-coast
+  foreach coast-candidates [
+     let n-here on-coast * (last ?) / total
+     let i-here int n-here
+     let f-here (n-here - i-here)
+     if random-float 1.0 < f-here [set i-here (i-here + 1)]
+     ask (item 0 ?) [add-to-prey-class-count pry cls i-here]
+     set n-remaining (n-remaining - i-here)
+  ]
+  ask center-patch [ 
+    add-to-prey-class-count pry cls n-remaining
+  ]
+
+  
+  DEBUG-MONITOR 1 (word "Distributing " off-coast " prey off coast to " length open-candidates " patches.")
+  ; For each patch-distance (p,d) pair in coast-candidates, add a third value which is the value of the Gaussian function of the distance d with the given standard deviation sd
+  set temp (list )
+  set total 0
+  foreach open-candidates [
+     let g gaussian (last ?) 0 sd-water
+     set total (total + g)
+     let t (lput g ?)
+     set temp lput t temp
+  ]
+
+  DEBUG-MONITOR 1 (word "Patches and relative normal distribution densities: "  temp)
+  set coast-candidates temp    ;  Now it is a list of doubles p, g where p is the patch and g the relative density
+  set n-remaining off-coast
+  foreach coast-candidates [
+     let n-here off-coast * (last ?) / total
+     let i-here int n-here
+     let f-here (n-here - i-here)
+     if random-float 1.0 < f-here [set i-here (i-here + 1)]
+     ask (item 0 ?) [add-to-prey-class-count pry cls i-here]
+     set n-remaining (n-remaining - i-here)
+  ]
+  ask center-patch [
+    add-to-prey-class-count pry cls n-remaining
+  ]  
+end
+
+; Context: ONE PATCH
+; Add n to the number of prey of the given class-type and given prey-type
+to add-to-prey-class-count [prey-type class-type n]
+  let temp-list (item prey-type prey-counts)
+  let temp-value (item class-type temp-list)
+  set temp-list (replace-item class-type temp-list (temp-value + n))
+  set prey-counts (replace-item prey-type prey-counts temp-list) 
+end
+
+  
+; Report the (patch, dist) pair in pairs with the largest distances less than dist
+to-report nextshorter-in-pair-list [pairs dist]
+  let i ((length pairs) - 1)                                       ; Last item in the list
+  while [i >= 0 and (last item i pairs  > dist)][set i (i - 1)]    ; Work backwards through the list to find pair with largest distances less than dist
+  report item i pairs
+end
+
+; Search pairs, a list of (patch,distance) pairs, to find all the patches in that list with distance is closest to dist.
+to-report closest-pairs-to-given-value [pairs dist] 
+   ; compute the minimum delta between dist and distance for all pairs in the list.
+   let delta (abs (dist - last (first pairs)))                     ; Find the difference between dist and the distance in the first pair of pairs.
+   let i 1                                                         ; Go through the rest of the list to find the minimum value of delta
+   while [i < length pairs][ 
+      let new-delta (abs (dist - last (item i pairs))) 
+      if new-delta < delta [set delta new-delta]
+      set i (i + 1)
+   ]
+   
+   ; delta should now be the minimum difference in the list of pairs between dist and distance.  Report all pairs with that minimum.
+   report filter [abs (dist - last ?) = delta] pairs 
+end
+
+; Computes the value of the gaussian function at x, when the mean is mn and the 
+; standard deviation is sd.  (The variance is sd^2). 
+to-report gaussian [x mn sd]
+  report (1 / (sd * sqrt ( 2 * pi ))) * (e ^ (-0.5 * (((x - mn) / sd) ^ 2)))
+end
