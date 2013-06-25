@@ -365,36 +365,36 @@ to-report gaussian [x mn sd]
   report (1 / (sd * sqrt ( 2 * pi ))) * (e ^ (-0.5 * (((x - mn) / sd) ^ 2)))
 end
 
-to distribute-along-coast [prey-count coastal-patch coastal-prob coastal-var ocean-var]
+
+to distribute-prey-about-patch [central-patch prey-count coastal-prob coastal-variance openwater-variance]
   ; Assume that every coastal patch gets the same proportion of shoreline
   ; from adjacent (diagonals included) patches.
   ; This effectively adds a half-patch wide buffer to all shorelines
   ; (try drawing it out to see what is meant)
-  
+end
+
+to-report distribute-discrete [prey-count prey-variance]  
   ; Effectively, we're distributing out to 3.5 standard deviations on either side
   ; using pre-computed integrals of the Gaussian pdf. Integral boundaries are half-sd aligned
   ; and of unit-width
   let normal-distribution [0.8 6 24.1 38.2 24.1 6 0.8]
   
   ; Calculate the length of one standard deviation in (rounded) patch-units
-  let coastal-sd-patches ((sqrt coastal-var) / kmpp)
+  let sd-patches ((sqrt prey-variance) / kmpp)
   ; Preserve symmetry: We can make an even number of corrections to 
   ; an odd number of cells, but we can't make an odd number of corrections to an
   ; even number of cells
   ; This approximation should be quite harmless at a scale ~ 0.6 kmpp
   ; and as sigma gets larger (because the abs(error) is bounded to 1 patch per sigma)
-  set coastal-sd-patches (2 * (round ((coastal-sd-patches + 1) / 2))) - 1
-  show coastal-sd-patches
-  
-  ; What subset of total population are distributed on this coastline?
-  let num-to-distribute (round (prey-count * coastal-prob))
+  set sd-patches (2 * (round ((sd-patches + 1) / 2))) - 1
+  DEBUG-MONITOR 2 sd-patches
   
   ; Of the prey distributed on coast, how many fall into each cell of our integrated Gaussian?
   ; Start with a rounded estimate
-  let prey-per map [round ((? * num-to-distribute) / 100)] normal-distribution
+  let prey-per map [round ((? * prey-count) / 100)] normal-distribution
   
   ; And then calculate the rounding error
-  let prey-remaining (num-to-distribute - (sum prey-per))
+  let prey-remaining (prey-count - (sum prey-per))
   
   ; Compensate the central value by the rounding error
   ; and drop cells whose expected populations are negligible
@@ -402,19 +402,20 @@ to distribute-along-coast [prey-count coastal-patch coastal-prob coastal-var oce
   set prey-per replace-item 3 prey-per ((item 3 prey-per) + prey-remaining)
   set prey-per filter [? != 0] prey-per
   let num-sd length prey-per
-  show prey-per
-  show (WORD (sum prey-per) "/" num-to-distribute)
+  DEBUG-MONITOR 2 prey-per
+  DEBUG-MONITOR 2 (WORD (sum prey-per) "/" prey-count)
   
   ; Redistribute the population within each integrated cell 
   ; by calculating the conversion from SD-units to patch-units
-  let final-distribution (n-values (coastal-sd-patches * num-sd) [round ((item (int (? / coastal-sd-patches)) prey-per) / coastal-sd-patches)])
+  let final-distribution (n-values (sd-patches * num-sd) [round ((item (int (? / sd-patches)) prey-per) / sd-patches)])
   let covered-patch-count length final-distribution
-  show final-distribution
+  DEBUG-MONITOR 2 final-distribution
   
   ; Calculate the new rounding error on a per-cell basis
-  set prey-remaining (map [?1 - ?2] prey-per (n-values num-sd [sum (sublist final-distribution (coastal-sd-patches * ?) (coastal-sd-patches * (? + 1)))]))
+  set prey-remaining (map [?1 - ?2] prey-per (n-values num-sd [sum (sublist final-distribution (sd-patches * ?) (sd-patches * (? + 1)))]))
+  DEBUG-MONITOR 3 prey-remaining
   ; Replicate the rounding error value into a list with entries for every patch
-  set prey-remaining (n-values covered-patch-count [item (int (? / coastal-sd-patches)) prey-remaining])
+  set prey-remaining (n-values covered-patch-count [item (int (? / sd-patches)) prey-remaining])
   
   ; Calculate the absolute distance from the center of a list with length matching final-distribution
   let g-center-dist (n-values covered-patch-count [ abs (int (? - ((covered-patch-count - 1) / 2))) ])
@@ -424,20 +425,69 @@ to distribute-along-coast [prey-count coastal-patch coastal-prob coastal-var oce
   ; cell boundaries.
   ; The "exterior distance" (saved in inv-center-dist) counts from outer boundaries towards the center
   ; The "interior distance" counts from the center towards outer boundaries
-  let center-dist (map [remainder (? - (int ((coastal-sd-patches + 1) / 2))) coastal-sd-patches ] g-center-dist)
-  let inv-center-dist (map [ifelse-value (? >= 0) [ (coastal-sd-patches - ?)][ (- (coastal-sd-patches mod 2)) - (2 * ?)  ]] center-dist)
-  set center-dist (map [ifelse-value (? >= 0) [ ? + 1 ][ 2 * (?  + 1 + (coastal-sd-patches / 2)) ]] center-dist)
+  let center-dist (map [remainder (? - (int ((sd-patches + 1) / 2))) sd-patches ] g-center-dist)
+  let inv-center-dist (map [ifelse-value (? >= 0) [ (sd-patches - ?)][ (- (sd-patches mod 2)) - (2 * ?)  ]] center-dist)
+  set center-dist (map [ifelse-value (? >= 0) [ ? + 1 ][ 2 * (?  + 1 + (sd-patches / 2)) ]] center-dist)
+  DEBUG-MONITOR 3 center-dist
+  DEBUG-MONITOR 3 inv-center-dist
   
   ; Compensate final-distribution based on the rounding error and cell-local distances
   ; If the rounding error is positive, compensate downwards in the outermost cells
   ; If the rounding error is negative, compensate upwards in the innermost cells
-  set final-distribution (map [ ifelse-value (?2 = 0)[ ?1 ][ ifelse-value (?2 < 0)[ ifelse-value ((abs ?2) >= ?4) [ ?1 - 1] [ ifelse-value (((?2 mod 2) != 0) and (?5 = 0)) [ ?1 + 1 ][ ?1 ] ] ][ ifelse-value (?2 >= ?3) [ ?1 + 1] [ ?1 ] ] ] ] final-distribution prey-remaining center-dist inv-center-dist g-center-dist)
-  show final-distribution
-  show (WORD (sum final-distribution) "/" num-to-distribute)
+  set final-distribution (map [
+      ifelse-value (?2 = 0) [
+         ?1
+        ][
+          ifelse-value (?2 < 0) [
+            ifelse-value ((abs ?2) >= ?4) [
+              ?1 - 1
+            ][
+              ifelse-value (((?2 mod 2) != 0) and (?5 = 0)) [ ?1 + 1 ][ ?1 ] 
+            ] 
+          ][ 
+            ifelse-value (?2 >= ?3) [
+               ifelse-value (((?2 mod 2) = 0) and (?5 = 0)) [ ?1 + 2 ][ ?1 + 1 ] 
+            ][
+             ?1 
+            ]
+          ]
+        ]
+      ]
+      final-distribution prey-remaining center-dist inv-center-dist g-center-dist
+    )
+  
+  DEBUG-MONITOR 2 final-distribution
+  DEBUG-MONITOR 2 (WORD (sum final-distribution) "/" prey-count)
+  report final-distribution
 
   
 end
 
-to distribute-at-sea
+; quick little stress-test
+; reports if any distribution fails to total correctly
+to-report fuzztest-distribute-discrete
+  let totals n-values 20000 [sum (distribute-discrete (floor (? / 200)) (? mod 200))]
+  let expected-totals n-values 20000 [floor (? / 200)]
+  let matches (map [?1 = ?2] totals expected-totals)
+  report reduce [?1 and ?2] matches
+end
 
+; Note that fold-point effectively cuts the left-most cell in half
+; and distribution routines that make use of a folded distribution
+; should act accordingly (i.e., the left-most cell IS the axis of rotation for areal distribution, 
+; and should all be dumped on a single patch).
+to-report fold-distribution [distribution fold-point]
+  
+  if (fold-point > (floor ((length distribution) / 2))) [
+    DEBUG-MONITOR 1 "'fold-point' was forward of center. Assuming symmetry and reversing 'distribution' to avoid truncation"
+    set distribution reverse distribution
+    set fold-point (-1) + ((length distribution) - fold-point)
+  ]
+  
+  let dcount length distribution
+  let indices n-values dcount [?]
+  
+  let dfp (2 * fold-point)
+  
+  report sublist (map [ifelse-value ((?2 > fold-point) and (?2 <= dfp)) [?1 + (item (dfp - ?2) distribution)][?1]] distribution indices) fold-point dcount
 end
