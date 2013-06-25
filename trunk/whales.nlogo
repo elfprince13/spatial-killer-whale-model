@@ -930,10 +930,10 @@ end
 ;end
 @#$#@#$#@
 GRAPHICS-WINDOW
-174
-12
-1225
-680
+238
+10
+1289
+678
 -1
 -1
 1.0
@@ -1023,31 +1023,13 @@ NIL
 NIL
 1
 
-OUTPUT
-283
-685
-1078
-736
-33
-
 SWITCH
--2
-459
-124
-492
+2
+588
+128
+621
 track-whales
 track-whales
-0
-1
--1000
-
-SWITCH
--2
-422
-176
-455
-shade-by-prey-density
-shade-by-prey-density
 0
 1
 -1000
@@ -1096,41 +1078,47 @@ whales-starved\n
 1
 11
 
-TEXTBOX
-8
-541
-157
-610
-Prey list numbers:\n0=Adult Seal   1=Juvenile\n2=Sea Lion      3=Juvenile\n4=Gray Whale  5=Juvenile
-11
-0.0
-1
-
 SLIDER
-2
-330
-174
-363
+1
+294
+173
+327
 days-per-period
 days-per-period
 10
 100
-100
+98
 2
 1
 NIL
 HORIZONTAL
 
-SWITCH
+BUTTON
+3
+546
+77
+579
+NIL
+redraw\n
+NIL
 1
-370
-130
-403
-show-regions
-show-regions
+T
+OBSERVER
+NIL
+NIL
+NIL
+NIL
+1
+
+CHOOSER
+1
+629
+217
+674
+map-mode
+map-mode
+"shore distance" "shore distance w/ graph" "prey density" "hunting regions" "hunting regions w/ graph" "voronoi" "voronoi w/ graph"
 0
-1
--1000
 
 @#$#@#$#@
 ## WHAT IS IT?
@@ -1461,7 +1449,7 @@ Polygon -7500403 true true 270 75 225 30 30 225 75 270
 Polygon -7500403 true true 30 75 75 30 270 225 225 270
 
 @#$#@#$#@
-NetLogo 5.0.4
+NetLogo 5.0.3
 @#$#@#$#@
 @#$#@#$#@
 @#$#@#$#@
