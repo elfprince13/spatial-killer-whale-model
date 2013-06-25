@@ -1,47 +1,75 @@
 ; Matthew Dickerson & Thomas Dickerson
-; with Karla Wentz
-; This file contains the basic code for loading in an environment map, including the global constants related to the world and the patches-own variables
+; ADDITIONAL CREDIT: Some of the code for translating from long-lat coordinates to distances and NetLogo coordinates was written by Karly Wentz in Summer 2011.
+;
+; Part of the Killer Whale IBM package.
+; This file contains the procedures and reporters for interfacing with the 2D world. This includes:
+;    Code for loading in an environment map, including the global constants related to the world and the patches-own variables.
+;    Code for the underlying geometric & geographic data structures (described below).
+;    Code for finding paths around the world, computing distances, and translating from long-lat to NetLogo coordinates.
+; Distances read from prey files and prey data structures are converted to NetLogo native patch-unit distances.
+;
+; There are several underying data geometric & geographic structures used for interaction with the world, such as navigation.
+;
+; A Voronoi diagram of the islands is constructed. Essentially, each water patch belongs to the Voronoi region of the nearest island.
+; Each island has a unique region number.  Every patch (land and water) knows its region.
+; Each water patch stores a reference to the nearest land patch, and (if it is not adjacent to the patch) the positive distance to that patch in patch units 
+; Patches on the boundaries between regions are labeled as Voronoi edges and Voronoi vertices.
+; 
+; Hunting regions are based on the Voronoi vertices of the islands. 
+; Essentially, hunting regions are duals of the island Voronoi diagrams -- island Voronoi vertices become sites (centers) of hunting regions.
+; THat is, each hunting region it is a Voronoi diagram whose sites are the island Voronoi vertices.  Each hunting region consists of all patches
+; closer to the same Voronoi vertex than to any other.
+; 
+; There is also an underlanding graph structure made of nodes and links, used for computing efficient long distance travel paths for whales.
+; Nodes are created on a small number of water patches. Some nodes -- usually associated with Voronoi vertices -- are special "anchor" nodes.
+; Every node stores the information needed to find the most efficient path to every anchor node.  This makes it efficient to find a path 
+; between any two nodes by having both patches find an efficient path to some anchor nodes.  (If every node where an anchor node, then paths would 
+; be all be optimal, but the data storage requirements would be much greater.)  Since most paths will end up going through anchor nodes, they 
+; are important parts of the whale travel algorithms.
+; 
 
 breed [nodes node]
 
-nodes-own [id nextlist distlist anchor? nearest-anchor nearest-anchor-dist]
+nodes-own [
+  anchor?                   ; TRUE if this is a special anchor nodes
+  id                        ; A unique id number for anchor nodes, used for indexing the next two lists.
+  nearest-anchor            ; The id of the nearest anchor node
+  nearest-anchor-dist       ; THe distance in patch units (along the graph) to the nearest anchor node
+  nextlist                  ; A list. nextnode [i] holds the next node on the shortest path from this node to the anchor with id i
+  distlist                  ; A list. distlist [i] holds the distance from this node to the anchor with id i
+]
 
 globals [
-  ; The following variables hold frequently used subsets of patches that meet certain conditions. This prevents the program from constanstly
-  ; asking all patches to evaluate some reporter
+  ; The following variables hold frequently used subsets of patches that meet certain conditions. 
+  ; These globals save the program from repeateding filtering through all patches to find oft-used subsets
   water         ; will hold all water patches -- patches with (water? = true)
   coast         ; will hold all coastal patches -- the subset of water such that (coastal? = true)
-  shore
-  vd-vertices
-  vd-edges
-  
+  shore         ; land patches adjacent to water 
+  vd-vertices   ; a list of all patches that are part of a Voronoi vertice -- that is patches that are adjacent to two (or more) different regions
+  vd-edges      ; a list of all patches that are port of a Voronoi edge -- that is patches that are adjacent to exactly one different region
+
+  max-shore-dist
+  min-shore-dist  
   
   ; GLOBALS SET ACCORDING TO THE IMPORTED MAP (MAP-IMAGE) -- will change depending on the image
   km-width      ; width of the imported world in km
   km-height     ; height of the imported world in km
   kmpp          ; kms per patch -- width and height of a single patch in km
   
-  ; The following will hold lists of length 2 that contain the long-lat coordinates of the
-  ; four corners of the imported map: ul=upper left, ur=upper right, ll=lower-let, etc.
-  ; ** THESE NEED TO BE SET BY THE PROCEDURE THAT INPUTS THE MAP
-  ul-long-lat 
+
+  ; ** THE FOLLOWING NEED TO BE SET BY THE PROCEDURE THAT INPUTS THE MAP ***
+  ul-long-lat    ; Lists of length 2 that contain the long-lat coordinates of the four corners: ul=upper left, ur=upper right, etc.        
   ur-long-lat
   ll-long-lat 
   lr-long-lat 
-  
-  ocean-seed
-  land-seed
-  
-  land-upper-threshold
-  water-lower-threshold
 
-  percent-done
+  ocean-seed               ; a patch known to be in saltwater (water this is not a pond)
+  land-seed                ; a patch known to be mainland -- or region 0
   
-  max-shore-dist
-  min-shore-dist
-  
-  voronoi-color-mode?
-  show-nodes?
+  ; Values representing the cut-offs between land, land/water mix (coastal) and open water. 
+  ; Water-lower-threshold represents a threshold subtracted off of 10, and land-upper-threshold represents a threshold added onto 0.
+  land-upper-threshold     
+  water-lower-threshold   
 ]
 
 patches-own [
@@ -53,16 +81,13 @@ patches-own [
   ; This is positive for non-costal water, 0 for water that is coast but adjacent to non-coast, and negative for coast that is more than 1 away from non-coast
   shore-dist     
   
-  ;;  *** NEW VD INFO ***
+  ;;  *** VD INFO ***
   region
   nearest-land
   vd-edge?
   vd-vertex?
   
-  ;; for testing
-  init-color
-  
-  ;; node-info
+  ;;  *** TRAVEL GRAPH INFO ***
   nearest-node  ; number of nearest node
   to-node       ; next patch on the path toward the nearest node, or self is nearest node on this patch
 ]
@@ -71,13 +96,15 @@ to SETUP-MONITOR [x y]
   if SETUP-MONITOR-LEVEL > x [show y]
 end
 
-
+; Information about the world is imported from two files.
+; The first file is a text file that contains information such as the long-lat coordinates of the world, the dimension of the world, etc.
+; The first line of the text file contains the name of a second file, an image file, that has the world map in grey-scale with black pixels
+; for land and white pixels for water, and gray pixels for coast (land-water mix).
 to load-map-parameters [map-file-name]
   file-open map-file-name
   
   let map-img-name file-read
   import-pcolors map-img-name
-  ask patches [set init-color pcolor mod 10]
   
   let km-dims file-read
   
@@ -114,11 +141,8 @@ end
 
 to load-map
   SETUP-MONITOR 0 "Loading world map."
-
-  set voronoi-color-mode? false    ; Set this to true if you want to see the patches colored with the voronoi regions for the islands
-  set show-nodes? false            ; Set this to true if you want to see the underlying graph used for whale movement
   
-  ; Load the map and initialize the distance variables
+
   load-map-parameters "se-map-data.txt"
   
   ; Find out which patches are water, and among those which are coastal, create a patchset of all the water patches, for later efficiency
@@ -142,7 +166,6 @@ to load-map
   SETUP-MONITOR 0 "Eliminating isolated water..."
   eliminate-ponds       ; Unmark patches that are water, but not connected to the ocean, so that sea creatures are not initialized there.
   ask water [set shore-dist 1]
- 
   show-scale
   show-north
 end
@@ -325,7 +348,7 @@ end
 ;==============================================
 
 
-; This procedure reports water patches with distance d of the calling agent, where d is the distance traveled by stepping
+; This procedure reports water patches within distance d of the calling agent, where d is the distance traveled by stepping
 ; from one water patch to another. 
 ; The distance d is _not_ a straightline distance, but a distance along a water path. It is a combination of L1 and L-inf metrics, stepping
 ; horizontally, vertically, and diagonally, but never across land. It is thus an approximation of (and always at least as great as) the
@@ -403,28 +426,33 @@ to-report water-patches-within-to-list [d]
   report queue
 end 
 
-to reset-drawing
-  ifelse voronoi-color-mode? [
-    ask patches [
-      ifelse water? [
-        set pcolor region * 10 + 7.5
-      ][
-        set pcolor region * 10 + 5
-      ] 
-    ]
-  ][
-    recolor-patches-by-depth
-  ]  
-  ifelse show-nodes? [
+; Draw the map according to the seletion of the map-mode selector on the user interface
+to redraw
+  ask nodes [set hidden? true]
+  ask links [set hidden? true]
+  
+  if map-mode = "shore distance" [color-by-shore-distance]
+  if map-mode = "shore distance w/ graph" [
+    color-by-shore-distance  
     ask nodes [set hidden? false]
-    ask links [set hidden? false]
-  ][
-    ask nodes [set hidden? true]
-    ask links [set hidden? true]
-  ] 
+    ask links [set hidden? false]  
+  ]
+  if map-mode = "prey density" [color-by-shore-distance]
+  if map-mode = "voronoi" [color-voronoi-regions]
+  if map-mode = "voronoi w/ graph" [
+    color-voronoi-regions
+    ask nodes [set hidden? false]
+    ask links [set hidden? false]  
+  ]
+  if map-mode = "hunting regions" [color-hunting-regions]
+  if map-mode = "hunting regions w/ graph" [
+    color-hunting-regions    
+    ask nodes [set hidden? false]
+    ask links [set hidden? false] 
+  ]
 end
 
-to recolor-patches-by-depth
+to color-by-shore-distance
   ask patches with [not water?][
     set pcolor green + 2
 ;    if ((pxcor mod region-width = 0) or (pycor mod region-width = 0)) [set pcolor black]
@@ -437,6 +465,11 @@ to recolor-patches-by-depth
   ]
 end
 
+; ========================== MAP SCALE ======================================
+; The north arrow and the distance scale are done with turtle pens so that they are not erased if the world is redrawn.
+; The distance scale turtle dies once it is done. The north arrow turtle remains as the pointer of the arrow.
+
+; Draw an arrow pointing north on the upper left part of the map
 to show-north
   ; We just make a generic turtle on a land patch in the upper left, and have it travel due north dragging's its pen
   crt 1 [
@@ -449,8 +482,9 @@ to show-north
   ]
 end
 
-; Create a km scale bar on the map
+; Create a km scale bar on the upper left part of the map
 to show-scale
+  ; We just make a generic turtle on a land patch in the upper left, and have it travel due north dragging's its pen
   crt 1 [
     set color black
     setxy (min-pxcor + 10) (max-pycor - 20)
@@ -458,13 +492,8 @@ to show-scale
     pd 
     fd 10
     rt 90
-    repeat 5 [
-      fd (10 / kmpp)   ; 10 kms
-      rt 90
-      fd 5
-      back 5
-      lt 90
-    ]
+    ; 5 10km ticks 
+    repeat 5 [  fd (10 / kmpp)  rt 90  fd 5  back 5  lt 90 ]
     rt 90
     fd 10
     die
@@ -474,35 +503,25 @@ to show-scale
   ask patch 95 608 [set plabel "50 km (10km/tick)" set plabel-color 0]
 end 
     
-;;====================================== VORONOI DIAGRAMS AND DIAGRAM BASED MOVEMENT ===============================
+;;====================================== VORONOI DIAGRAMS CONSTRUCTION ===============================
 
-; The mainland as well as each island represent simple polygons. This procedure constructs the discreted Voronoi diagram of those polygons.
+; The mainland as well as each island represent simple polygons. This procedure constructs the discretized Voronoi diagram of those polygons.
 ; First, each simple polygon land unit is identified and numbered, starting with the mainland as region 0. Each is colored randomly with (repeated) NetLogo colors.
-; Next, each water patch is labeled with the number of the nearest island, and given a ligher shade of the matching color.
+; Next, each water patch is labeled with the region number of the nearest island.
 to compute-vd
   SETUP-MONITOR 0 "Creating Voronoi diagram of water patches."
   SETUP-MONITOR 1 "Marking and labeling islands."
   ask patches [set region -1]                   ; initialization all patches to null region.
-  regionalize-land                              ; identify each distinct region and number/color all its patches
-;  merge-isolated-islands                        ; find islands of size 1 and merge them into larger adjacent islands
   
-   ; breaking the VD into two stages makes it more efficient as the non-inland patches can be evaluated with fewer comparisons.
-;;  label-inland                                  ; compute the VD information for inland water patches                
-;;  label-atsea                                   ; compute the VD information for non-inland water patches
-  label-water
-  
-  ; Shrink shore finds islands separated by other islands with a strip of water 1-patch wide, and it widens that strip 
-  ; to allow two distinct Voronoi edge, one for each region.
-  ; shrink-shore                                ; COMMENTED OUT AS THE NODE-APPROACH DOES NOT REQUIRE THIS
+  ; Computing the discretized Voronoi diagram -- one Voronoi region for each island or land mass
+  regionalize-land                              ; identify each distinct region (a simply polygonal land mass) and number all its patches
+  label-water                                   ; find which region each water patch belongs to
 
   ; Identify which water patches are Voronoi edges and which are Voronoi vertices
   SETUP-MONITOR 1 "Identifying Voronoi features (edges)"
   find-edges
   SETUP-MONITOR 1 "Identifying Voronoi features (vertices)"
   find-vertices
-  
-  if not voronoi-color-mode? [recolor-patches-by-depth]
-  
   set max-shore-dist [shore-dist] of max-one-of water [shore-dist]
 end
 
@@ -628,12 +647,19 @@ end
 
 ;; === END OF VORONOI DIAGRAM SECTION ================
 
-
+; ========================= PATH TESTING PROCEDURES ==================================
+; Procedures to allow the user to test the path(s) a whale would follow to get from point A to point B
+;
+; Allow the user to click on a patch, and reports that patch. 
+; To provide live feedback, the patch highlighted by the "watch" command during the selection process
+; If the user selects a land patch, this will report a water patch instead.
 to-report click-on-patch
   let wp one-of water
   let x [pxcor] of water
   let y [pycor] of water
   watch wp
+  
+  ; Busy wait loop so that the user presses and then releases the mouse
   while [not mouse-down?][]
   while [mouse-down?][
     set x mouse-xcor
@@ -647,7 +673,7 @@ to-report click-on-patch
   report wp   
 end
 
-
+; Allow the user to click on two water patches, compute the path between them, and then color the path.
 to test-a-path
   output-print "Select a starting patch."
   let start-path click-on-patch
@@ -656,11 +682,17 @@ to test-a-path
   color-path-list path-from-patch-to-patch start-path end-path
 end
 
-;; ============================ GRAPH CONSTRUCTION AND ALGORITHMS ====================
+to color-path-list [p-list]
+  foreach p-list [ask ? [set pcolor red]]
+end
+
+;; ============================ GRAPH CONSTRUCTION ALGORITHMS ====================
 
 ; This creates a graph of nodes for node based travel. 
 ; Each water patch will know its nearest node and have a pointer to the next patch on a path to its nearest node. 
 ; Some nodes will be marked as special anchor nodes, and every node will also knows its nearest anchor and a path to that anchor.
+; Dikstra's algorithm is used to computer, for every node, the shortest path to every anchor node.  (Space requirements to compute the path from every
+; node to every other is too large.)  Using anchor nodes allows an approximation of the most efficient path between two nodes.
 to make-graph
   make-nodes                       ; Create nodes densely enough so that efficent paths can be found to water patches via nodes
   make-edges                       ; Create edges to make a sparse graph. Edges should be between visible nodes -- that is a straight path only through water.
@@ -669,11 +701,17 @@ to make-graph
   find-nearest-nodes               ; For each water patch, find the nearest node.
 end
 
+; Create nodes (anchor and non-anchor) for the travel graph.
+; Anchor nodes are created at Voronoi vertices
+; Non anchor nodes are created on Voronoi edges
+; Nodes are pruned based on density constraints, with nodes being less dense further from shore
 ; Assumes that all patches have been marked with shore-dist, which is >0 if not adjacent to shore, and <0 if not adjacent to any patches that are >0.
 ; Assumes that Voronoi vertices have been identified.
 to make-nodes
   SETUP-MONITOR 0 "Creating graph nodes."
+
   ; Ignore British Columbia.  We will only deal with southeast alaska, where we have prey data
+  ; *** FOR GENERALIZATION TO OTHER LOCATIONS... LATER THIS SHOULD BECOME A LIST OF IGNORED LAND MASSES STORED IN THE MAP DATA FILE ******
   let bc1 [region] of patch 1034 223
   let bc2 [region] of patch 1021 157
   
@@ -682,16 +720,23 @@ to make-nodes
   let min-anchor-dist 35          ; Initially make sure that all nodes are farther apart than this
   let highest-y 500               ; Don't put nodes above this position as they are only fjords with no passages
   
+
+  ; Uses Voronoi vertices as locations for anchor nodes, but don't place two within min-anchor-dist of each other
+
   ask vd-vertices [
     if not any? nodes in-radius min-anchor-dist [make-anchor-here]
   ]
   SETUP-MONITOR 1 (word (count nodes) " anchors were created.")
   
+  ; Create non-anchor nodes on Voronoi edges.  
+  ; All non-anchor nodes shoudl be within max-sd of the shore and not in fjords.  They should be less dense further from shore.
   let candidate-edges vd-edges with [(shore-dist <= max-sd) and (shore-dist > 0) and (pycor < highest-y) and (region != bc1) and (region != bc2)]
   ask n-of ((count candidate-edges) / 5) candidate-edges[
-    if not any? nodes in-radius ((max (list 2 shore-dist)) ^ 1.05) [make-node-here] 
+    if not any? nodes in-radius ((max (list 2 shore-dist)) ^ 1.05) [make-node-here]        ; Don't put two nodes too close to each other.
   ]
-  SETUP-MONITOR 1  (word (count nodes with [not anchor?]) " edge nodes were created.")
+  
+  SETUP-MONITOR 1  (word (count nodes with [not anchor?]) " non-anchor nodes were created.")
+
 end
 
 ; Now add edges.  Anchors should be connected to all other anchors for which there is a straight-line path across water.
@@ -702,15 +747,17 @@ to make-edges
   let anchors nodes with [anchor?]
   ask anchors[      
     ask other anchors [if (not link-neighbor? myself) and (segment-on-water? pxcor pycor [pxcor] of myself [pycor] of myself) 
-       [create-link-with myself [set color red if not show-nodes? [set hidden? true]]]] 
+       [create-link-with myself [set color red set hidden? true]]] 
   ]
   
-  ; Create a sparse around of edges among other nodes. Link each node to visible neighbors among the six closest neighbors.
-  ask nodes [
+
+  ; Create a sparse graph of edges among other nodes. Link each node to visible neighbors among the six closest neighbors.
+  ask nodes [ 
+
     let closest-neighbors min-n-of 6 other nodes [distance myself]
     ask closest-neighbors [
       if (not link-neighbor? myself) and (segment-on-water? pxcor pycor [pxcor] of myself [pycor] of myself) 
-          [create-link-with myself [set color white if not show-nodes? [set hidden? true]]]
+          [create-link-with myself [set color white set hidden? true]]
     ]
   ]  
   SETUP-MONITOR 0  (word (count links) " links were created between nodes.") 
@@ -724,7 +771,7 @@ to make-node-here
     set size 2
     set color white
     set anchor? false
-    if not show-nodes? [set hidden? true] 
+    set hidden? true 
   ]
 end
 
@@ -735,7 +782,7 @@ to make-anchor-here
     set size 5
     set color red
     set anchor? true
-    if not show-nodes? [set hidden? true] 
+    set hidden? true 
   ]
 end
 
@@ -770,16 +817,17 @@ to remove-deadends
   SETUP-MONITOR 1  (word (count nodes) " nodes remain with " (count links) " edges.")
 end
 
-; set nearest-node and to-node for all water patches in the L-infinity distance metric.
-; That is, each water patch will know its nearest node in the graph. To find that node, it can follow a sequence of to-nodes.
+; Each water patch is set with its nearest node in the graph, and with a pointer to the next patch on a path to that node. 
+; To find that node, it can follow a sequence of to-nodes.
 ; An interleaved SSSP-style algorithm is employed to compute this, running simultaneoulsy from all nodes.
+; Note that the distance metric is not L2. The path follows horizontal, verticle, and diagonal steps to neighboring patches.
 to find-nearest-nodes
   ask water [set nearest-node nobody set to-node nobody]        ; Initialization
   let queue (list )                                             ; Queue of unvisited water patches to be processed.
   ask nodes [                                                   ; For each node, queue up the patch it is on. That patch is closest to that node.                                    
     ask patch-here [
       set nearest-node myself
-      set to-node myself
+      set to-node self
       set queue lput self queue
     ]
   ]
@@ -877,51 +925,58 @@ to SSSP [anchor-number]
   ]
 end
 
+;  =============== REPORTERS FOR FINDING AN EFFICIENT PATH THROUGH WATER FROM ONE PATCH TO ANOTHER ======================
+; A path is simply a list of patches.  The patch is navigable. All patches are water, and it does not cross land to get from 
+; one coastal patch to another.
 
-; Creates a list of patches from patch p1 to p2. 
-; The list is guaranteed to be entirely on water. It is NOT in general the minimum length path.
+; Creates a path (list of patches) from patch p1 to p2. 
+; It is NOT necessarily the minimum length path.
 ; The path goes from patch p1 onto the node graph, follows a shortest path on the graph to an anchor, and then reverses that process to get to patch p2.
+; The starting patch and the final patch are included. 
 to-report path-from-patch-to-patch [p1 p2]
+  ; For the starting and ending patches, find the nearest node on the travel graph
   let n1 [nearest-node] of p1
   let n2 [nearest-node] of p2
-  let path (list p1)
+
+  ; The path will have three parts: p1 -> n1  followed by n1 -> n2 followed by n2 -> p2. 
+  ; Start with the path p1 -> n1
+  let path path-to-nearest-node p1
   
-  set path path-to-nearest-node p1
-  
+  ; Compute the path from n1 to n2, and append.
   let temp-path path-from-node-to-node n1 n2
   set path merge-path path temp-path
   
+  ; Compute the path from n2 to p2 and append it
   set temp-path path-from-nearest-node p2
   set path merge-path path temp-path
   
   report path
 end
 
-; Finds the path of patches from patch p to its nearest node, and appends it to the list path -- not counting the starting patch p.
-; The resulting list is returned.
+; Finds and reports the path of patches from patch p to its nearest node on the travel graph. 
+; The starting patch and the final patch are included. 
 to-report path-to-nearest-node [p]
-   let s p
-   let n [nearest-node] of p
-   let result (list p)
-   while [s != [patch-here] of n][
-     set s [to-node] of s
-     set result lput s result
+   let result (list p)                 ; initialize the path to contain just the starting patch
+   let n [nearest-node] of p           ; n is the nearest node to patch p
+   while [p != [patch-here] of n][     ; the path is done when it reaches the patch the node n is on
+     set p [to-node] of p              ; If the path is not done, get the next node on the path from p to n...
+     set result lput p result          ; ... and add it to the end of the list.
    ]
    report result
 end
 
 
-; Finds the path of patches from patch p to its nearest node, and appends it to the list path -- not counting the starting patch, which is the nearest node to p.
-; The resulting list is returned.
+; This procedure should report the reverse of the above procedure: path-to-nearest-node.
+; That is, it reports a path to patch p from its nearest node.
+; It should be more efficient to compute it directly than to compute the path to the node and then reverse it.
+; It is computer in the same way as path-to-nearest-node except new patches are added to the front, not the end, of the list.
 to-report path-from-nearest-node [p]
-   let s p
+   let result (list p)                  ; Add each patch on the path to a new list, in reverse order.
    let n [nearest-node] of p
-   let result (list)                 ; Add each patch on the path to a new list, in reverse order.
-   while [s != [patch-here] of n][
-     set result fput s result
-     set s [to-node] of s
-   ]  
-   set result fput s result                                  
+   while [p != [patch-here] of n][
+     set p [to-node] of p
+     set result fput p result
+   ]                                
    report result
 end
 
@@ -933,14 +988,21 @@ to-report path-from-node-to-node [n1 n2]
   let anc [nearest-anchor] of n2                  ; the nearest anchor of n2
   let path1 path-from-node-to-anchor n1 anc       ; Get the path from n1 to anc
   let path2 path-from-node-to-anchor n2 anc       ; The reverse of the path from anc to n2
+  
+  ; check if path2 backtracks on the end of path1, and if so remove that extra part
+  while [length path1 > 1 and length path2 > 1 and second-to-last path1 = second-to-last path2][
+    set path1 butlast path1
+    set path2 butlast path2
+  ]
+  
   report merge-path path1 (reverse path2)         ; The final result
 end
 
 ; Reports the path of patches from node n1 to anchor node anc following the shortest path info on the graph.
-; The patches of both n and anc are not included in the path.
+; The patches of both n and anc are  included in the path.
 to-report path-from-node-to-anchor [n anc]
   let index [id] of anc                             ; The index of anc determines where in the nextlist of nodes the shortest path to anc is stored.
-  let path (list)                                   ; create an empty path of patches
+  let path (list [patch-here] of n)                   ; create an empty path of patches
   while [n != anc] [                                ; for each edge (n,nn) in the shorest path on the graph, find the corresponding path of patches and append to path.
     let nn (item index ([nextlist] of n))
     let partial (find-line ([xcor] of n) ([ycor] of n) ([xcor] of nn) ([ycor] of nn))
@@ -951,26 +1013,31 @@ to-report path-from-node-to-anchor [n anc]
 end
 
 ; Append a list of patches p2 to the end of the list p1.  
-; If the first node of p2 is the same as the last node of p1, the duplicate is removed.
+; The first node of p2 should be the same as the last node of p1.  This duplicate is removed.
+; Any other backtracking part of the path is removed.
 to-report merge-path [p1 p2]
-   ; This special case of empty lists is only needed in order an error when comparing the last of p1 with the first of p2
-   if length p1 = 0 [report p2]                    ; If p1 is empty, report p2
-   if length p2 = 0 [report p1]                    ; If p2 is empty, report p1
-   if (first p2 = last p1) [set p2 butfirst p2]    ; Don't include duplicate
-   let i 0
-   while [i < length p2][                          ; Loop through all items of p2, adding them to the end of p1.
-      let temp (item i p2)                         ; get the next item from p2...
-      set p1 (lput temp p1)                        ; ... and append to p1
-      set i (i + 1)
+   ifelse last p1 != first p2 [ 
+     DEBUG-MONITOR 1 "ERROR: merging paths that do not overlap" 
+   ][
+     set p2 butfirst p2
    ]
-   report p1
+   
+   ; check if the start of path 2 backtracks along the end of path 1, and if so remove overlap
+   while [length p1 > 1 and length p2 > 0 and second-to-last p1 = first p2][
+      set p1 butlast p1
+      set p2 butfirst p2
+   ]
+   
+   report sentence p1 p2
 end
 
-to color-path-list [p-list]
-  foreach p-list [ask ? [set pcolor red]]
+; report the second to last item in patch list pl. Assume the last has length > 1
+to-report second-to-last [pl]
+   let n length pl
+   if n < 2 [ DEBUG-MONITOR 1 "ERROR: Looking at the second to last element of a list of length < 2"  report nobody]
+   report item (n - 2) pl
 end
-
-
+ 
 ; ========================================== VISIBILITY =======
 
 ; Find-line visits (in order) all of the patches crossed by the directed line segment from (x1,y1) to (x2,y2).
