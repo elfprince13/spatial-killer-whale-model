@@ -373,11 +373,19 @@ to distribute-prey-about-patch [central-patch prey-count coastal-prob coastal-va
   ; (try drawing it out to see what is meant)
 end
 
-to-report distribute-discrete [prey-count prey-variance]  
+to-report distribute-discrete [prey-count prey-variance areal-weights]  
   ; Effectively, we're distributing out to 3.5 standard deviations on either side
   ; using pre-computed integrals of the Gaussian pdf. Integral boundaries are half-sd aligned
   ; and of unit-width
+  
+  ; areal-weights must be symmetric or certain assumptions are likely to become problematic
+  ; however, we'll take care of normalization
   let normal-distribution [0.8 6 24.1 38.2 24.1 6 0.8]
+  set normal-distribution (map [(?1 * ?2) ] normal-distribution areal-weights)
+  let norming-factor (sum normal-distribution) / 100
+  set normal-distribution (map [(?1 / norming-factor) ] normal-distribution)
+  DEBUG-MONITOR 2 normal-distribution
+  DEBUG-MONITOR 2 (WORD (sum normal-distribution) "/" 100)
   
   ; Calculate the length of one standard deviation in (rounded) patch-units
   let sd-patches ((sqrt prey-variance) / kmpp)
@@ -400,7 +408,15 @@ to-report distribute-discrete [prey-count prey-variance]
   ; and drop cells whose expected populations are negligible
   ; (for later efficiency)
   set prey-per replace-item 3 prey-per ((item 3 prey-per) + prey-remaining)
-  set prey-per filter [? != 0] prey-per
+  let zeroes map [? = 0] prey-per
+  let non-zero position false zeroes
+  ifelse (non-zero != false) [
+    ; Assume symmetry for speed-sake
+    set prey-per sublist prey-per non-zero (7 - non-zero) 
+  ] [
+    DEBUG-MONITOR 2 "Somebody asked us to distribute no prey (1)! Something might be wrong"
+    set prey-per [0]
+  ] 
   let num-sd length prey-per
   DEBUG-MONITOR 2 prey-per
   DEBUG-MONITOR 2 (WORD (sum prey-per) "/" prey-count)
@@ -456,13 +472,13 @@ to-report distribute-discrete [prey-count prey-variance]
       final-distribution prey-remaining center-dist inv-center-dist g-center-dist
     )
   
-  let zeroes map [? = 0] final-distribution
-  let non-zero position false zeroes
+  set zeroes map [? = 0] final-distribution
+  set non-zero position false zeroes
   ifelse (non-zero != false) [
     ; Assume symmetry for speed-sake
     set final-distribution sublist final-distribution non-zero (covered-patch-count - non-zero) 
   ] [
-    DEBUG-MONITOR 1 "Somebody asked us to distribute no prey! Something might be wrong"
+    DEBUG-MONITOR 2 "Somebody asked us to distribute no prey (2)! Something might be wrong"
     set final-distribution [0]
   ] 
   
@@ -473,10 +489,14 @@ to-report distribute-discrete [prey-count prey-variance]
   
 end
 
+to-report distribute-discrete-easy [prey-count prey-variance]
+  report distribute-discrete prey-count prey-variance [1 1 1 1 1 1 1]
+end
+
 ; quick little stress-test
 ; reports if any distribution fails to total correctly
 to-report fuzztest-distribute-discrete
-  let totals n-values 20000 [sum (distribute-discrete (floor (? / 200)) (? mod 200))]
+  let totals n-values 20000 [sum (distribute-discrete-easy (floor (? / 200)) (? mod 200))]
   let expected-totals n-values 20000 [floor (? / 200)]
   let matches (map [?1 = ?2] totals expected-totals)
   report reduce [?1 and ?2] matches
