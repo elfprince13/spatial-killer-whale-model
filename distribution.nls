@@ -249,82 +249,7 @@ end
 ; The total of test-value for open-water patches within distance sd-water of p should be ~ 1 standard deviation of n * (1 - p-coast)
 
 to distribute [center-patch pry cls n p-coast sd-coast sd-water] 
-  DEBUG-MONITOR 1 (word "Distributing around patch " center-patch ", " n " individuals of prey-type " pry " and age-class " cls)
-  let sd-coast-p (sd-coast / kmpp)         ; sd value in patch units 
-  let sd-water-p (sd-water / kmpp)
-  
-  let f-on-coast (p-coast * n)             ; expected number that should go on a coastal patch
-  let on-coast int f-on-coast              ; integer truncation of this value
-  set f-on-coast (f-on-coast - on-coast)   ; remaining fractional portion of this value
-  if (random-float 1.0 < f-on-coast) [set on-coast (on-coast + 1)]
-  let off-coast (n - on-coast)
-  
-  ; Compute list of all patches that will be considered to receive prey distributed around p.
-  ; The list will contain pairs of (patch, water-distance)
-  let max-dist-away (K-DIST-MAX * max (list sd-coast-p sd-water-p))
-                     ; We will only consider patches within K-DIST-MAX * the great of the SD distances
-  DEBUG-MONITOR 1 (word "Computing all patches within " max-dist-away " patches of " center-patch)
-  let all-candidates ([water-patches-within-to-list max-dist-away false] of center-patch)
-
-  ; Compute the sublists of such patches that are coastal and non-coastal
-  DEBUG-MONITOR 0 "Computing sublists of coastal and non-coastal candidates."
-  let coast-candidates filter [[coastal?] of first ?] all-candidates
-  let open-candidates filter [not [coastal?] of first ?] all-candidates
-  DEBUG-MONITOR 2 coast-candidates 
-  DEBUG-MONITOR 2 open-candidates
-  
-  
-  DEBUG-MONITOR 1 (word "Distributing " on-coast " prey on coast to " length coast-candidates " patches.")
-  ; For each patch-distance (p,d) pair in coast-candidates, add a third value which is the value of the Gaussian function of the distance d with the given standard deviation sd
-  let temp (list )                           ; A list of patches, distances, and proportions based on those distances
-  let total 0                                ; Keep track of total put on patches so far, to be sure that the exact number gets put out.
-  foreach coast-candidates [
-     let g gaussian (last ?) 0 sd-coast
-     set total (total + g)
-     let t (lput g ?)
-     set temp lput t temp
-  ]
-  DEBUG-MONITOR 1 (word "Patches and relative normal distribution densities: " temp)
-  set coast-candidates temp    ;  Now it is a list of doubles p, g where p is the patch and g the relative density
-  let n-remaining on-coast
-  foreach coast-candidates [
-     let n-here on-coast * (last ?) / total
-     let i-here int n-here
-     let f-here (n-here - i-here)
-     if random-float 1.0 < f-here [set i-here (i-here + 1)]
-     ask (item 0 ?) [add-to-prey-class-count pry cls i-here]
-     set n-remaining (n-remaining - i-here)
-  ]
-  ask center-patch [ 
-    add-to-prey-class-count pry cls n-remaining
-  ]
-
-  
-  DEBUG-MONITOR 1 (word "Distributing " off-coast " prey off coast to " length open-candidates " patches.")
-  ; For each patch-distance (p,d) pair in coast-candidates, add a third value which is the value of the Gaussian function of the distance d with the given standard deviation sd
-  set temp (list )
-  set total 0
-  foreach open-candidates [
-     let g gaussian (last ?) 0 sd-water
-     set total (total + g)
-     let t (lput g ?)
-     set temp lput t temp
-  ]
-
-  DEBUG-MONITOR 1 (word "Patches and relative normal distribution densities: "  temp)
-  set coast-candidates temp    ;  Now it is a list of doubles p, g where p is the patch and g the relative density
-  set n-remaining off-coast
-  foreach coast-candidates [
-     let n-here off-coast * (last ?) / total
-     let i-here int n-here
-     let f-here (n-here - i-here)
-     if random-float 1.0 < f-here [set i-here (i-here + 1)]
-     ask (item 0 ?) [add-to-prey-class-count pry cls i-here]
-     set n-remaining (n-remaining - i-here)
-  ]
-  ask center-patch [
-    add-to-prey-class-count pry cls n-remaining
-  ]  
+  distribute-prey-about-patch center-patch pry cls n p-coast (sd-coast * sd-coast) (sd-water * sd-water)
 end
 
 ; Context: ONE PATCH
@@ -366,11 +291,114 @@ to-report gaussian [x mn sd]
 end
 
 
-to distribute-prey-about-patch [central-patch prey-count coastal-prob coastal-variance openwater-variance]
+to distribute-prey-about-patch [central-patch prey-type class-type prey-count coastal-prob coastal-variance openwater-variance]
   ; Assume that every coastal patch gets the same proportion of shoreline
   ; from adjacent (diagonals included) patches.
   ; This effectively adds a half-patch wide buffer to all shorelines
   ; (try drawing it out to see what is meant)
+  
+  let cpc (round prey-count * coastal-prob)
+  let opc prey-count - cpc ; Explicitly avoid any rounding errors
+  
+  if ( cpc > 0 ) [
+    let cdist distribute-discrete-easy cpc coastal-variance
+    let seed find-a-shore central-patch
+    let cw-pos seed
+    let ccw-pos seed
+    
+    let center (((length cdist) - 1) / 2)
+    let counter 1
+    show cdist
+    show sum cdist
+    let cdistd 0
+    ask central-patch [
+      add-to-prey-class-count prey-type class-type (item center cdist)
+      set cdistd cdistd + (item center cdist)
+    ]
+    while [counter <= center] [
+      set cw-pos inc-shore cw-pos 1
+      set ccw-pos inc-shore ccw-pos (-1)
+      show cw-pos
+      show ccw-pos
+      
+      
+      ask (item 0 cw-pos) [
+        add-to-prey-class-count prey-type class-type (item (center + counter) cdist)
+        set cdistd cdistd + (item (center + counter) cdist)
+      ]
+      
+      ask (item 0 ccw-pos) [
+        add-to-prey-class-count prey-type class-type (item (center - counter) cdist)
+        set cdistd cdistd + (item (center - counter) cdist)
+      ]
+      
+      set counter counter + 1 
+    ]
+    show cdistd
+  ]
+  
+  if ( opc > 0 ) [
+    
+    let odistd 0
+    
+    ; Calculate the length of one standard deviation in (rounded) patch-units
+    let sd-patches ((sqrt openwater-variance) / kmpp)
+    ; Preserve symmetry: We can make an even number of corrections to 
+    ; an odd number of cells, but we can't make an odd number of corrections to an
+    ; even number of cells
+    ; This approximation should be quite harmless at a scale ~ 0.6 kmpp
+    ; and as sigma gets larger (because the abs(error) is bounded to 1 patch per sigma)
+    set sd-patches (2 * (round ((sd-patches + 1) / 2))) - 1
+    
+    let prey-patches [water-patches-within (3.5 * sd-patches) false] of central-patch
+    ask prey-patches [ set visited? round visited? ]
+    let patch-counts (list
+      (count prey-patches with [visited? <= 0.5 * sd-patches])
+      (count prey-patches with [(visited? > 0.5 * sd-patches) and (visited? <= 1.5 * sd-patches)])
+      (count prey-patches with [(visited? > 1.5 * sd-patches) and (visited? <= 2.5 * sd-patches)])
+      (count prey-patches with [visited? > 2.5 * sd-patches])
+    )
+    
+    set patch-counts (list 
+      ((item 3 patch-counts) / 2) ((item 2 patch-counts) / 2) ((item 1 patch-counts) / 2) 
+      (item 0 patch-counts) ((item 1 patch-counts) / 2) ((item 2 patch-counts) / 2) ((item 3 patch-counts) / 2) 
+    )
+    
+    let odist distribute-discrete opc openwater-variance patch-counts
+    show odist
+    show sum odist
+    
+    let odist-fold fold-distribution odist (floor ((length odist) / 2))
+    show odist-fold
+    show sum odist-fold
+    let odistm 0
+    (foreach odist-fold (n-values (length odist-fold) [?]) [
+        let near-patches prey-patches with [visited? = ?2]
+        ifelse ((count near-patches) > 0) [
+          let per-patch (floor (?1 / (count near-patches)))
+          let patch-remainder (?1 mod (count near-patches))
+          if (per-patch > 0) [
+            ask near-patches [
+              add-to-prey-class-count prey-type class-type per-patch
+              set odistd (odistd + per-patch)
+            ]
+          ]
+          ask n-of patch-remainder near-patches [
+              add-to-prey-class-count prey-type class-type 1
+              set odistd (odistd + 1)
+          ]
+        ][
+          show (WORD "No patches at distance " ?2)
+          set odistm (odistm + ?1)
+          
+        ]
+    ])
+    show odistd
+    show odistm
+    ask prey-patches [set visited? -1]
+    
+  ]
+  
 end
 
 to-report distribute-discrete [prey-count prey-variance areal-weights]  

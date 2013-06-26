@@ -11,7 +11,7 @@
 
 ; This file (whale.nlogo) includes model controls plus whale behavior.
 
-__includes ["map.nls" "prey.nls" "constants.nls" "distribution.nls"]
+__includes ["map.nls" "prey.nls" "constants.nls" "distribution.nls" "geometry.nls"]
 ; ------- ADDITIONAL FILES ----------
 ;     map.nls includes procedures and declarations for spatial information.
 ;     constants.nls includes declaration and initialization of constants, primarily related to whale physiology and movement
