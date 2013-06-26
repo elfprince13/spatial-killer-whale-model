@@ -354,76 +354,38 @@ end
 ; horizontally, vertically, and diagonally, but never across land. It is thus an approximation of (and always at least as great as) the
 ; shortest distance a whale would actually travel to reach the given patch. Meaning that the number of patches returned will be smaller than
 ; the actual number reachable by whales traveling distance d.
-to-report water-patches-within [d]
-  ; The local variable result will contain the patchset to be returned. It includes the calling patch. Patches are added in non-decreasing order of distance.
-  let result patch-set self
+to-report water-patches-within [d exclude-coast?]
+  set visited? 0               
+  let queue (list self)
   
-  ; This queue will contain pairs of patches to be processed plus distances from the starting patch to the patch in the queue.
-  ; Any patch in the queue has been added to result, and is within distance d of the calling patch.
-  let queue (list (list self 0))                 
-  
-  ; Process all pairs of (patch,distance) in the FIFO queue until the queue is empty.
-  ; Each patch processed may result in new patches being added.
+  ;set pcolor red
+
   while [not empty? queue][
-    let next first queue              ; Remove the next pair from the queue... 
+    let p first queue              ; Remove the next patch from the queue... 
     set queue but-first queue         ; ... and update the queue
-    let p first next                  ; Let p be the patch in the pair... 
-    let c last next                   ; ... and c the distance in the pair
     
     ; If some neighbors of p further away from the starting point than d, then neighbors need not be examined
-    if (c + 1 < d) [ 
-      ; Find all neighbors of p that are water patches, and are closer than d to the starting patch, and have not yet been visited.                 
-      let candidates ([neighbors] of p) with [water? and ((distance p) + c <= d) and (not member? self result)]
-      let ord-candidates sort-on [distance p] candidates                 ; Sort the neighbors by distance to process neighbors4 before diagonal neighbors
+    if (([visited?] of p) + 1 < d) [ 
       
-      ; For each neighbor meeting the requirement, add the neighbor to the result set, and place it in the queue to process its neighbors.
-      foreach ord-candidates [
-        ask ? [
-          set result (patch-set result self)
-          set queue (lput (list self (c + distance p)) queue)
+      ask [neighbors4] of p [
+        if water? and ((not coastal?) or (not exclude-coast?)) and (visited? < 0) [
+         let best-neighbor min-one-of neighbors with [water? and ((not coastal?) or (not exclude-coast?)) and (visited? >= 0) and (segment-on-water? ([pxcor] of myself) ([pycor] of myself) pxcor pycor )] [visited? + (distance myself)]
+         set visited? ([visited? + (distance myself)] of best-neighbor)
+;         set pcolor red
+         set queue lput self queue 
         ]
       ]
+      
     ]
   ]
+  let result water with [visited? >= 0]
+  ask result [set visited? -1] ; don't keep this line in the finished code, it should be done externally, but keep it here for testing-sake to save doing it manually each time
   report result
 end 
 
 ; Same as above, but returns the patches in an ordered list (ordered by distance) as (patch,distance) pairs.
-to-report water-patches-within-to-list [d]
-  ; The local variable result will contain the patchset to be returned. It includes the calling patch. Patches are added in non-decreasing order of distance.
-  let visited patch-set self
-  
-  ; This queue will contain pairs of patches to be processed plus distances from the starting patch to the patch in the queue.
-  ; Any patch in the queue has been added to result, and is within distance d of the calling patch.
-  let queue (list (list self 0))                 
-  let i 0
-  
-  ; Process all pairs of (patch,distance) in the FIFO queue until the queue is empty.
-  ; Each patch processed may result in new patches being added.
-  while [i < length queue][
-    let next item i queue             ; Remove the next pair from the queue... 
-    set i (i + 1)
-    let p first next                  ; Let p be the patch in the pair... 
-    let c last next                   ; ... and c the distance in the pair
-    
-    ; If some neighbors of p further away from the starting point than d, then neighbors need not be examined
-    if (c + 1 < d) [ 
-      ; Find all neighbors of p that are water patches, and are closer than d to the starting patch, and have not yet been visited.                 
-      let candidates ([neighbors] of p) with [water? and ((distance p) + c <= d) and (not member? self visited)]
-      let ord-candidates sort-on [distance p] candidates                 ; Sort the neighbors by distance to process neighbors4 before diagonal neighbors
-      
-      ; For each neighbor meeting the requirement, add the neighbor to the result set, and place it in the queue to process its neighbors.
-      foreach ord-candidates [
-        ask ? [
-          set visited (patch-set visited self)
-          set queue (lput (list self (c + distance p)) queue)
-        ]
-      ]
-    ]
-  ]
-  ; set queue sort-by [last ?1 < last ?2] queue
-  ; show queue
-  report queue
+to-report water-patches-within-to-list [d exclude-coast?]
+  report sort-on [visited?] water-patches-within d exclude-coast?
 end 
 
 ; Draw the map according to the seletion of the map-mode selector on the user interface
@@ -1040,117 +1002,163 @@ end
  
 ; ========================================== VISIBILITY =======
 
-; Find-line visits (in order) all of the patches crossed by the directed line segment from (x1,y1) to (x2,y2).
-; It processes patches one column at a time. That is, it visits all the intersected patches with the same pxcor of
-; (x1,y1), then it moves one column toward (x2,y2) and vistis all the intersected patches in that column.
-; TO do this, it updates the y-intercept where the line crosses columns.
-; A list of visited patches is reported
+; Find-line reports the list of water patches visited by a whale traveling in a straight line from the patch at
+; (x1,y1) to the patch at (x2,y2). If the line passes through a land patch, this reports "nobody" to indicate
+; that a navigable path does not exist.
+; The reporter processes patches along the path one column at a time: it visits all the intersected patches with pxcor = x1,
+; then those with pxcor = x1 + 1, then x1 + 2, until it has visited all patches with px = x2.
+; TO do this, it updates the y-intercept where the line crosses columns.  Remember that a patch coordinate pxcor pycor indicate
+; the center of the patch. So the boundary between a patch and its neighbor to the right (a "column") is at pxcor + 0.5
 to-report find-line [x1 y1 x2 y2]
-  let visited-patches (list )         ; initialize the list of visited patches to be returned
-  let reverse? false                  ; if this is set to true, we will visit patches in the opposite order that the segments hits them
-  
-  ; Special case where all the patches crossed by the line have the same pxcor
-  if round x1 = round x2 [
-    ; find the starting patch--the patch containing the coordinate (x1,y1)
-    let cur-y round y1
-    let cur-x round x1
-    
-    ; determine whether the line segment goes up or down
-    let inc 1
-    if y2 < y1 [set inc -1]
-    
-    ; visit all the patches intersected by the segment 
-    while [cur-y != round y2][
-      set visited-patches visit (patch cur-x cur-y) visited-patches reverse?
-      set cur-y (cur-y + inc)
-    ]
-    set visited-patches visit (patch cur-x cur-y) visited-patches reverse?
-    report visited-patches
-  ]
-  
-  ; Now hand the other cases, where the starting pxcor is different from the final pxcor
-  
-  ; Determine if line moves left to right or right to left.
-  ; If right to left, then set reverse? = true and patches will be visited in the reverse order    
-             
-  if x1 > x2 [
-    set reverse? true
-    let temp x1
-    set x1 x2
-    set x2 temp
-    set temp y1
-    set y1 y2
-    set y2 temp
-  ]
-  
-  ; Find the change in x, change in y, and slope of the segment,  
-  ; Note that the slope cannot be infinity or it would have been handled in the special case above
-  let delta-x (x2 - x1)
-  let delta-y (y2 - y1)
-  let slope (delta-y / delta-x)
-  
-  ; (cur-x,cur-y) is the actual integer patch coordinate of the current patch being visited, starting with
-  ; the first endpoint of the segment
-  let cur-x (round x1)
-  let cur-y (round y1)
-  set visited-patches visit (patch cur-x cur-y) visited-patches reverse?        ; Visit the starting patch
+  DEBUG-MONITOR 2 (word "Call to reporter find-line for segment: (" x1 "," y1 ") (" x2 ","  y2 ").")
 
-  ; y-int is the y coordinate of where this line will cross into the next column of patches
-  ; Find the first y-int
-  let xd ((cur-x + .5) - x1)      ; xd is the x-distance from x1 to the next column
-  let y-int (y1 + xd * slope)     ; (cur-x + .5, y-int) is a coordinate where the line crosses a column
-      
-  ; If y1 > y2, then the slope is negative and each successive patch is lower than the previous one
-  ifelse y1 <= y2 [    
-    while [y-int > (cur-y + .5)][   ; visit all the intersected patches with the starting pxcor
-      set cur-y (cur-y + 1)
-      set visited-patches visit (patch cur-x cur-y) visited-patches reverse?
-    ] 
-    
-    ; keep incrementing cur-x by 1 and visiting all intersected patches until column before x2
-    set cur-x (cur-x + 1)                              ; update the current column
-    if (y-int = cur-y + .5)[ set cur-y (cur-y + 1)]    ; the line goes through a corner of 4 patches
-    set y-int (y-int + slope)                          ; compute the next y-intercept
-    while [cur-x < (round x2)][                        ; loop through all values of cur-x until x2
-      set visited-patches visit (patch cur-x cur-y) visited-patches reverse?
-      ; loop through all pycors of intersected patches at the current x-cor
-      while [(y-int > (cur-y + .5)) and (y2 > (cur-y + .5))][                      
-        set cur-y (cur-y + 1)
-        set visited-patches visit (patch cur-x cur-y) visited-patches reverse?
-      ]
-      set cur-x (cur-x + 1)                              ; update to the final column
-      if (y-int = cur-y + .5)[ set cur-y (cur-y + 1)]    ; find the max pycor to be visited
-      set y-int (y-int + slope)       
-    ]
-    
-    while [(cur-x < (x2 + .5)) and (cur-y < (y2 + 0.5))][
-      set visited-patches visit (patch cur-x cur-y) visited-patches reverse?
-      set cur-y (cur-y + 1)
-    ]
-  ][ ; SYMMETRIC TO THE ABOVE FOR DOWNSLOPING SEGMENTS
-     while [y-int < (cur-y - .5)][
-      set cur-y (cur-y - 1)
-      set visited-patches visit (patch cur-x cur-y) visited-patches reverse?
-    ] 
-    set cur-x (cur-x + 1)
-    if (y-int = cur-y - .5)[ set cur-y (cur-y - 1)]
-    set y-int (y-int + slope)
-    while [cur-x < (round x2)][
-      set visited-patches visit (patch cur-x cur-y) visited-patches reverse?
-      while [(y-int < (cur-y - .5)) and (y2 < (cur-y - .5))][
-        set cur-y (cur-y - 1)
-        set visited-patches visit (patch cur-x cur-y) visited-patches reverse?
-      ]
-      set cur-x (cur-x + 1)
-      if (y-int = cur-y - .5)[ set cur-y (cur-y - 1)]
-      set y-int (y-int + slope)       
-    ]
-    while [(cur-x < (x2 + .5)) and (cur-y > (y2 - 0.5))][
-      set visited-patches visit (patch cur-x cur-y) visited-patches reverse?
-      set cur-y (cur-y - 1)
-    ]  
-  ]
-  report visited-patches
+   ; Determine if line moves left to right or right to left. If the line moves right to left (i.e. x1 > x2) then set reverse? = true
+   ; and patches will be visited from (x2,y2) back to (x1,y1) but placed on the list in reverse order so that the reported list still goes form (x1,y2) to (x2,y2)
+   let reverse? false
+   if x1 > x2 [
+     set reverse? true
+     let temp x1
+     set x1 x2
+     set x2 temp
+     set temp y1
+     set y1 y2
+     set y2 temp
+   ]
+
+   ; (cur-x,cur-y) will store the coordinates of the current patch being looked at -- the next to be added to the path.
+   ; find the coordinates (cur-x,cur-y) of the starting patch--the patch containing the coordinate (x1,y1)
+   let cur-x round x1
+   let cur-y round y1
+
+   ; Start with the first patch on the segment.  Test to make sure it is water, and if it is add it to the list.
+   DEBUG-MONITOR 3 (word "Testing patch at initial endpoint (" cur-x ", "cur-y ").")
+   if not [water?] of patch cur-x cur-y [report nobody]
+   let visited-patches (list (patch cur-x cur-y))
+
+   ; -------- SPECIAL CASE: handle case where all the patches crossed by the line have the same pxcor
+   if round x1 = round x2 [
+     DEBUG-MONITOR 3 (word "Special case. All crossed patches have the same x-coordinate.")
+
+   ; inc stores the value added to y at each step. Determine whether the line segment goes up or down. If up, then inc=1 and if down then inc=-1.
+   let inc 1
+   if y2 < y1 [set inc -1]
+
+   ; visit all the patches intersected by the segment. They all have the same px-cor in this special case.
+   while [cur-y != round y2][
+     set cur-y (cur-y + inc)
+     if not [water?] of patch cur-x cur-y [report nobody]
+     set visited-patches visit (patch cur-x cur-y) visited-patches reverse?
+   ]
+   report visited-patches
+   ]
+   ; -------- END SPECIAL CASE --------------
+   ; Now hand the other cases, where the starting pxcor is different from the final pxcor. The slope can still be positive or negative
+
+   ; Before determining if this is a positive or negatively sloped line, we initialize the variables that will be used in either case.
+   ; Find the change in x, change in y, and slope of the segment,
+   let delta-x (x2 - x1)
+   let delta-y (y2 - y1)
+   let slope (delta-y / delta-x)    ; Note that the slope cannot be infinity or it would have been handled in the special case above
+
+   ; y-int is the y coordinate of where this line will cross into the next column of patches
+   let xd ((cur-x + .5) - x1)      ; xd is the x-distance from x1 to the next column
+   let y-int (y1 + xd * slope)     ; (cur-x + .5, y-int) is a coordinate where the line crosses a column
+
+   ; Test if slope is positive, or negative
+   ; If y1 <= y2, then the slope is 0 or positive, and each patch looked at is higher or to the right of the previous one
+   ; If y1 > y2, then the slope is negative and each successive patch is lower or to the right of the previous one
+   ifelse y1 <= y2 [
+     ;  --- CASE 1. POSITIVE SLOPE ---------
+     DEBUG-MONITOR 3 "Segment has non-negative slope."
+     while [y-int > (cur-y + .5)][   ; visit all the intersected patches with the starting pxcor
+       set cur-y (cur-y + 1)
+       if not [water?] of patch cur-x cur-y [report nobody]
+       set visited-patches visit (patch cur-x cur-y) visited-patches reverse?
+       DEBUG-MONITOR 2 (word "Testing patches with initial x-cor " cur-x ", " cur-y)
+     ]
+
+     ; keep incrementing cur-x by 1 and visiting all intersected patches until column before x2
+     set cur-x (cur-x + 1)                              ; update the current column
+
+     ; Special case for when the line goes through a corner of 4 patches
+     if (y-int = cur-y + .5)[
+       DEBUG-MONITOR 3 (word "Segment going through a corner between (" (cur-x - 1) "," (cur-y + 1)") and (" cur-x "," cur-y ").")
+       if ((not [water?] of patch (cur-x - 1) (cur-y + 1)) and (not [water?] of patch cur-x cur-y)) [report nobody]
+       set cur-y (cur-y + 1)
+     ]
+
+     set y-int (y-int + slope)                          ; compute the next y-intercept
+     while [cur-x < (round x2)][                        ; loop through all values of cur-x until x2
+       DEBUG-MONITOR 3 (word "Testing next x-cor " cur-x ", " cur-y)
+       if not [water?] of patch cur-x cur-y [report nobody]
+       set visited-patches visit (patch cur-x cur-y) visited-patches reverse?
+       ; loop through all pycors of intersected patches at the current x-cor
+       while [(y-int > (cur-y + .5)) and (y2 > (cur-y + .5))][
+         set cur-y (cur-y + 1)
+         DEBUG-MONITOR 3 (word "Testing patch " cur-x ", " cur-y)
+         if not [water?] of patch cur-x cur-y [report nobody]
+         set visited-patches visit (patch cur-x cur-y) visited-patches reverse?
+       ]
+       set cur-x (cur-x + 1)                              ; update to the final column
+                                                          ; Special case for when the line goes through a corner of 4 patches
+       if (y-int = cur-y + .5)[
+         DEBUG-MONITOR 3 (word "Segment going through a corner between ("  (cur-x - 1) "," (cur-y + 1)") and (" cur-x "," cur-y ").")
+         if ((not [water?] of patch (cur-x - 1) (cur-y + 1)) and (not [water?] of patch cur-x cur-y)) [report nobody]
+         set cur-y (cur-y + 1)
+       ]
+       set y-int (y-int + slope)
+     ]
+
+     while [(cur-x < (x2 + .5)) and (cur-y < (y2 + 0.5))][
+       DEBUG-MONITOR 3 (word "Testing patches with final x-cor " cur-x ", " cur-y)
+       if not [water?] of patch cur-x cur-y [report nobody]
+       set visited-patches visit (patch cur-x cur-y) visited-patches reverse?
+       set cur-y (cur-y + 1)
+     ]
+   ][ ; SYMMETRIC TO THE ABOVE FOR DOWNSLOPING SEGMENTS
+      ;  --- CASE 1. POSITIVE SLOPE ---------
+   DEBUG-MONITOR 3 "Segment has negative slope."
+   while [y-int < (cur-y - .5)][
+     set cur-y (cur-y - 1)
+     DEBUG-MONITOR 3 (word "Testing patches with initial x-cor " cur-x ", " cur-y)
+     if not [water?] of patch cur-x cur-y [report nobody]
+     set visited-patches visit (patch cur-x cur-y) visited-patches reverse?
+   ]
+   set cur-x (cur-x + 1)
+   ; Special case for when the line goes through a corner of 4 patches
+   if (y-int = cur-y - .5)[
+     DEBUG-MONITOR 3 (word "Segment going through a corner between (" (cur-x - 1) "," (cur-y - 1) ") and (" cur-x "," cur-y ").")
+     if ((not [water?] of patch (cur-x - 1) (cur-y - 1)) and (not [water?] of patch cur-x cur-y)) [report nobody]
+     set cur-y (cur-y - 1)
+   ]
+
+   set y-int (y-int + slope)
+   while [cur-x < (round x2)][
+     DEBUG-MONITOR 3 (word "Testing next x-cor " cur-x ", " cur-y)
+     if not [water?] of patch cur-x cur-y [report nobody]
+     set visited-patches visit (patch cur-x cur-y) visited-patches reverse?
+     while [(y-int < (cur-y - .5)) and (y2 < (cur-y - .5))][
+       set cur-y (cur-y - 1)
+       DEBUG-MONITOR 3 (word "Testing patch " cur-x ", " cur-y)
+       if not [water?] of patch cur-x cur-y [report nobody]
+       set visited-patches visit (patch cur-x cur-y) visited-patches reverse?
+     ]
+     set cur-x (cur-x + 1)
+     if (y-int = cur-y - .5)[
+       DEBUG-MONITOR 3 (word "Segment going through a corner between (" (cur-x - 1) "," (cur-y - 1) ") and (" cur-x "," cur-y ").")
+       if ((not [water?] of patch (cur-x - 1) (cur-y - 1)) and (not [water?] of patch cur-x cur-y)) [report nobody]
+       set cur-y (cur-y - 1)
+     ]
+     set y-int (y-int + slope)
+   ]
+   while [(cur-x < (x2 + .5)) and (cur-y > (y2 - 0.5))][
+     DEBUG-MONITOR 3 (word "Testing patch with final x-cor " cur-x ", " cur-y)
+     if not [water?] of patch cur-x cur-y [report nobody]
+     set visited-patches visit (patch cur-x cur-y) visited-patches reverse?
+     set cur-y (cur-y - 1)
+   ]
+   ]
+   report visited-patches
 end
 
 ; Adds p to the list vpl.  If reverse is true, then p is added to the front of vpl (a stack or LIFO list). Otherwise it is edded to the end (a queue or FIFO list)
@@ -1163,152 +1171,11 @@ to-report visit [p vpl reverse?]
   report vpl
 end
 
-; A variant of the find-line algorithm that simply reports false if the directed segment from (x1,y1) to (x2,y2) passes through a non-water patch,
-; and true otherwise.  There is one special case where the two reporters are different. This reports false if the path passes directly through the
-; corner between four patches if two of those patches are land -- assuming that whales could not travel there.
+; Uses the find-line algorithm to report true if the segment from (x1,y1) to (x2,y2) passes only through water (including coastal) patches.
+; Reports false if the line passes through land patches. In the case where the line passes exactly through a corner between four patches,
+; at most one of those four patches can be land. If two or more patches are land, then the path is not navigable by a whale, and this reports false.
 to-report segment-on-water? [x1 y1 x2 y2]
-
-  DEBUG-MONITOR 2 (word "Call to reporter segment-on-water? for segment: (" x1 "," y1 ") (" x2 ","  y2 ").")
-
-  ; Special case where all the patches crossed by the line have the same pxcor
-  if round x1 = round x2 [
-    DEBUG-MONITOR 3 (word "Special case. All crossed patches have the same x-coordinate.")
-    ; find the starting patch--the patch containing the coordinate (x1,y1)
-    let cur-y round y1
-    let cur-x round x1
-
-    ; determine whether the line segment goes up or down
-    let inc 1
-    if y2 < y1 [set inc -1]
-
-    ; visit all the patches intersected by the segment
-    while [cur-y != round y2][
-      if not [water?] of patch cur-x cur-y [report false]
-      set cur-y (cur-y + inc)
-    ]
-    if not [water?] of patch cur-x cur-y [report false]
-    report true
-  ]
-
-  ; Now hand the other cases, where the starting pxcor is different from the final pxcor
-
-  ; Determine if line moves left to right or right to left.
-  ; If right to left, then set reverse? = true and patches will be visited in the reverse order
-  let reverse? false
-  if x1 > x2 [
-    set reverse? true
-    let temp x1
-    set x1 x2
-    set x2 temp
-    set temp y1
-    set y1 y2
-    set y2 temp
-  ]
-
-  ; Find the change in x, change in y, and slope of the segment,
-  ; Note that the slope cannot be infinity or it would have been handled in the special case above
-  let delta-x (x2 - x1)
-  let delta-y (y2 - y1)
-  let slope (delta-y / delta-x)
-
-  ; (cur-x,cur-y) is the actual integer patch coordinate of the current patch being visited, starting with
-  ; the first endpoint of the segment.  We keep updating (cur-x,cur-y) and then testing patch cur-x cur-y.
-  let cur-x (round x1)
-  let cur-y (round y1)
-  DEBUG-MONITOR 3 (word "Testing patch at initial endpoint (" cur-x ", "cur-y ").")
-  if not [water?] of patch cur-x cur-y [report false]      ; Visit the starting patch
-
-  ; y-int is the y coordinate of where this line will cross into the next column of patches
-  ; Find the first y-int
-  let xd ((cur-x + .5) - x1)      ; xd is the x-distance from x1 to the next column
-  let y-int (y1 + xd * slope)     ; (cur-x + .5, y-int) is a coordinate where the line crosses a column
-
-  ; Test if slope is positive, or negative
-  ; If y1 <= y2, then the slope is 0 or positive, and each patch looked at high higher or to the right of the previous one
-  ; If y1 > y2, then the slope is negative and each successive patch is lower or to the right of the previous one
-  ifelse y1 <= y2 [
-    DEBUG-MONITOR 3 "Segment has non-negative slope."
-    while [y-int > (cur-y + .5)][   ; visit all the intersected patches with the starting pxcor
-      set cur-y (cur-y + 1)
-      if not [water?] of patch cur-x cur-y [report false]
-      DEBUG-MONITOR 2 (word "Testing patches with initial x-cor " cur-x ", " cur-y)
-    ]
-
-    ; keep incrementing cur-x by 1 and visiting all intersected patches until column before x2
-    set cur-x (cur-x + 1)                              ; update the current column
-
-    ; Special case for when the line goes through a corner of 4 patches
-    if (y-int = cur-y + .5)[
-      DEBUG-MONITOR 3 (word "Segment going through a corner between (" (cur-x - 1) "," (cur-y + 1)") and (" cur-x "," cur-y ").")
-      if ((not [water?] of patch (cur-x - 1) (cur-y + 1)) and (not [water?] of patch cur-x cur-y)) [report false]
-      set cur-y (cur-y + 1)
-    ]
-    set y-int (y-int + slope)                          ; compute the next y-intercept
-    while [cur-x < (round x2)][                        ; loop through all values of cur-x until x2
-      DEBUG-MONITOR 3 (word "Testing next x-cor " cur-x ", " cur-y)
-      if not [water?] of patch cur-x cur-y [report false]
-      ; loop through all pycors of intersected patches at the current x-cor
-      while [(y-int > (cur-y + .5)) and (y2 > (cur-y + .5))][
-        set cur-y (cur-y + 1)
-       DEBUG-MONITOR 3 (word "Testing patch " cur-x ", " cur-y)
-       if not [water?] of patch cur-x cur-y [report false]
-      ]
-      set cur-x (cur-x + 1)                              ; update to the final column
-      ; Special case for when the line goes through a corner of 4 patches
-      if (y-int = cur-y + .5)[
-        DEBUG-MONITOR 3 (word "Segment going through a corner between (" (cur-x - 1) "," (cur-y + 1)") and (" cur-x "," cur-y ").")
-        if ((not [water?] of patch (cur-x - 1) (cur-y + 1)) and (not [water?] of patch cur-x cur-y)) [report false]
-        set cur-y (cur-y + 1)
-      ]
-      set y-int (y-int + slope)
-    ]
-
-    while [(cur-x < (x2 + .5)) and (cur-y < (y2 + 0.5))][
-      DEBUG-MONITOR 3 (word "Testing patches with final x-cor " cur-x ", " cur-y)
-      if not [water?] of patch cur-x cur-y [report false]
-      set cur-y (cur-y + 1)
-    ]
-  ][ ; SYMMETRIC TO THE ABOVE FOR DOWNSLOPING SEGMENTS
-    DEBUG-MONITOR 3 "Segment has negative slope."
-    while [y-int < (cur-y - .5)][
-      set cur-y (cur-y - 1)
-      DEBUG-MONITOR 3 (word "Testing patches with initial x-cor " cur-x ", " cur-y)
-      if not [water?] of patch cur-x cur-y [report false]
-    ]
-    set cur-x (cur-x + 1)
-    ; Special case for when the line goes through a corner of 4 patches
-    if (y-int = cur-y - .5)[
-      DEBUG-MONITOR 3 (word "Segment going through a corner between (" (cur-x - 1) "," (cur-y - 1) ") and (" cur-x "," cur-y ").")
-      if ((not [water?] of patch (cur-x - 1) (cur-y - 1)) and (not [water?] of patch cur-x cur-y)) [report false]
-      set cur-y (cur-y - 1)
-    ]
-
-    set y-int (y-int + slope)
-    while [cur-x < (round x2)][
-      DEBUG-MONITOR 3 (word "Testing next x-cor " cur-x ", " cur-y)
-      if not [water?] of patch cur-x cur-y [report false]
-      while [(y-int < (cur-y - .5)) and (y2 < (cur-y - .5))][
-        set cur-y (cur-y - 1)
-        DEBUG-MONITOR 3 (word "Testing patch " cur-x ", " cur-y)
-        if not [water?] of patch cur-x cur-y [report false]
-      ]
-      set cur-x (cur-x + 1)
-      if (y-int = cur-y - .5)[
-        DEBUG-MONITOR 3 (word "Segment going through a corner between (" (cur-x - 1) "," (cur-y - 1) ") and (" cur-x "," cur-y ").")
-        if ((not [water?] of patch (cur-x - 1) (cur-y - 1)) and (not [water?] of patch cur-x cur-y)) [report false]
-        set cur-y (cur-y - 1)
-      ]
-      set y-int (y-int + slope)
-    ]
-    while [(cur-x < (x2 + .5)) and (cur-y > (y2 - 0.5))][
-      DEBUG-MONITOR 3 (word "Testing patch with final x-cor " cur-x ", " cur-y)
-      if not [water?] of patch cur-x cur-y [report false]
-      set cur-y (cur-y - 1)
-    ]
-  ]
-
-  ; If the procedures reaches this point, then it has tested the entire segment and not passed through a non-water patch
-  report true
+    report (find-line x1 y1 x2 y2) != nobody
 end
 
 to color-voronoi-regions
