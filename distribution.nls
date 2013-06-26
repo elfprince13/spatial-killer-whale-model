@@ -264,7 +264,7 @@ to distribute [center-patch pry cls n p-coast sd-coast sd-water]
   let max-dist-away (K-DIST-MAX * max (list sd-coast-p sd-water-p))
                      ; We will only consider patches within K-DIST-MAX * the great of the SD distances
   DEBUG-MONITOR 1 (word "Computing all patches within " max-dist-away " patches of " center-patch)
-  let all-candidates ([water-patches-within-to-list max-dist-away] of center-patch)
+  let all-candidates ([water-patches-within-to-list max-dist-away false] of center-patch)
 
   ; Compute the sublists of such patches that are coastal and non-coastal
   DEBUG-MONITOR 0 "Computing sublists of coastal and non-coastal candidates."
@@ -455,6 +455,16 @@ to-report distribute-discrete [prey-count prey-variance]
       ]
       final-distribution prey-remaining center-dist inv-center-dist g-center-dist
     )
+  
+  let zeroes map [? = 0] final-distribution
+  let non-zero position false zeroes
+  ifelse (non-zero != false) [
+    ; Assume symmetry for speed-sake
+    set final-distribution sublist final-distribution non-zero (covered-patch-count - non-zero) 
+  ] [
+    DEBUG-MONITOR 1 "Somebody asked us to distribute no prey! Something might be wrong"
+    set final-distribution [0]
+  ] 
   
   DEBUG-MONITOR 2 final-distribution
   DEBUG-MONITOR 2 (WORD (sum final-distribution) "/" prey-count)
