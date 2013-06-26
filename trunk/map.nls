@@ -261,90 +261,6 @@ to eliminate-ponds
   set coast coast with [coastal?]
 end
 
-;;==========================================================================================
-;;  PROCEDURES AND REPORTERS FOR CONVERTING LONG,LAT COORDINATES INTO KMs AND WORLD COORDINATES in NETLOGO
-
-; Using a formula from wikipedia.com to calculate the width of one degree of longitude and an input 
-; length in degrees and the average latitude between two points, we output the distance
-; in km for the x coordinate of the point
-to-report long-degrees-to-km [degrees avglat]
-  let onedegree-x-km (pi / 180) * 6367.5 * cos (avglat) 
-  report degrees * onedegree-x-km  
-end
-
-; Using a formula from wikipedia.com to calculate the length of one degree of longitude (latitude) and an input 
-; length in degrees and the average latitude between the two points, we output the distance
-; in km for the y coordinate of the point
-to-report lat-degrees-to-km [degrees avglat]
-  let onedegree-y-km (111132.954 - (559.822 * cos (2 * avglat)) + (1.175 * cos (4 * avglat))) / 1000 
-  report degrees * onedegree-y-km
-end
-
-
-; Given two positions in the world specified as (long,lat) pairs, determine the distance between
-; these two positions in kms. 
-; NOTE:  This is very accurate if the positions differ by 1 degree in latitude.  The greater
-; the difference in latitude, the greater the error 
-to-report distance-between [long1 lat1 long2 lat2]
-  ; The function depends on average latitude and the change in degrees longitude and latitude
-  let avglat (lat1 + lat2) / 2
-  let xdegrees long2 - long1
-  let ydegrees lat2 - lat1
-  
-  ; Convert the change in degrees to a change in kms
-  let d-x long-degrees-to-km xdegrees avglat
-  let d-y lat-degrees-to-km ydegrees avglat
-  
-  ; Compute the distance from the change in x and change in y in kms
-  report sqrt (d-x ^ 2 + d-y ^ 2)
-end
-
-;Converts an input longitude latitude coordinate to a list in the format [x y] which gives x and y coordinates in patch
-;distances to show a point on the netlogo world
-;THIS VERSION USES HERON'S FORMULA to compute the distance from the input point to the bottom and left sides of the world as the heights
-;of two triangles.  *** Will not work for long lat points off the bottom or left side of the world.
-to-report convert-long-lat [long lat] 
-  ; Triangle A is formed from the input point to the lower left and lower right corners.
-  ; Triangle B is formed from the input point to the lower left and upper left corners.
-  ; The distance from the bottom and left sides of the rectangle is thus the heights of these two triangles respectively.
-  let LL distance-between long lat (item 0 ll-long-lat) (item 1 ll-long-lat)    ;distance from input point to the lower left corner
-  let LA distance-between long lat (item 0 lr-long-lat) (item 1 lr-long-lat)    ;distance from input point to the lower right corner
-  let LB distance-between long lat (item 0 ul-long-lat) (item 1 ul-long-lat)    ;distance from input point to the upper left corner
-
-  ; Special case of points on the bottom or left side of the world
-  ; if long lat is on bottom edge of the world, area of triangle is 0 and Sa - km-width may be negative due to round-off.  
-  let Sa (LA + LL + km-width) / 2      ; semi-perimeter for triangle a
-  let Aa 0
-  if Sa > km-width [                   ; if the point is not on the bottom edge.  
-      let product (Sa * (Sa - LA) * (Sa - LL) * (Sa - km-width)) 
-      if (product < 0) [report nobody]            
-      set Aa sqrt product    ;Area of the triangles as defined by Heron's formula
-  ]
-  
-  let Sb (LB + LL + km-height) / 2     ; semi-perimeter for triangle b
-  let Ab 0 
-  if Sb > km-height [
-    set Ab sqrt (Sb * (Sb - LL) * (Sb - LB) * (Sb - km-height)) 
-  ]
-  
-  ; Compute the (x,y) coordinates of this point in the rotated world in units of kms, relative to 0,0
-  let x-km (2 * Ab) / km-height
-  let y-km (2 * Aa) / km-width
-  
-  ; Note that 0,0 is actually the middle of the bottom left pixel, so the lower left corner of the world is actually (-0.5, -0.5) in patch units
-  ; Convert from kms to patches by dividing the number of kms by the number of kms per patch.
-  let x  (x-km / kmpp)   ; - 0.5
-  let y  (y-km / kmpp)   ; - 0.5
-  report (list x y)
-end
-
-;Reports the patch based on the calculated x y coordinates from an input longitude latitude coordinate
-to-report long-lat-patch [long lat]
-   let coord (convert-long-lat long lat)
-   if coord = nobody [report nobody]    ; special case of a long lat coordinate being off the current world
-   report patch (item 0 coord) (item 1 coord) 
-end
-
 ;==============================================
 
 
@@ -379,7 +295,7 @@ to-report water-patches-within [d exclude-coast?]
     ]
   ]
   let result water with [visited? >= 0]
-  ask result [set visited? -1] ; don't keep this line in the finished code, it should be done externally, but keep it here for testing-sake to save doing it manually each time
+  ;ask result [set visited? -1] ; don't keep this line in the finished code, it should be done externally, but keep it here for testing-sake to save doing it manually each time
   report result
 end 
 
@@ -1028,184 +944,6 @@ to-report second-to-last [pl]
    if n < 2 [ DEBUG-MONITOR 1 "ERROR: Looking at the second to last element of a list of length < 2"  report nobody]
    report item (n - 2) pl
 end
- 
-; ========================================== VISIBILITY =======
-
-; Find-line reports the list of water patches visited by a whale traveling in a straight line from the patch at
-; (x1,y1) to the patch at (x2,y2). If the line passes through a land patch, this reports "nobody" to indicate
-; that a navigable path does not exist.
-; The reporter processes patches along the path one column at a time: it visits all the intersected patches with pxcor = x1,
-; then those with pxcor = x1 + 1, then x1 + 2, until it has visited all patches with px = x2.
-; TO do this, it updates the y-intercept where the line crosses columns.  Remember that a patch coordinate pxcor pycor indicate
-; the center of the patch. So the boundary between a patch and its neighbor to the right (a "column") is at pxcor + 0.5
-to-report find-line [x1 y1 x2 y2]
-  DEBUG-MONITOR 2 (word "Call to reporter find-line for segment: (" x1 "," y1 ") (" x2 ","  y2 ").")
-
-   ; Determine if line moves left to right or right to left. If the line moves right to left (i.e. x1 > x2) then set reverse? = true
-   ; and patches will be visited from (x2,y2) back to (x1,y1) but placed on the list in reverse order so that the reported list still goes form (x1,y2) to (x2,y2)
-   let reverse? false
-   if x1 > x2 [
-     set reverse? true
-     let temp x1
-     set x1 x2
-     set x2 temp
-     set temp y1
-     set y1 y2
-     set y2 temp
-   ]
-
-   ; (cur-x,cur-y) will store the coordinates of the current patch being looked at -- the next to be added to the path.
-   ; find the coordinates (cur-x,cur-y) of the starting patch--the patch containing the coordinate (x1,y1)
-   let cur-x round x1
-   let cur-y round y1
-
-   ; Start with the first patch on the segment.  Test to make sure it is water, and if it is add it to the list.
-   DEBUG-MONITOR 3 (word "Testing patch at initial endpoint (" cur-x ", "cur-y ").")
-   if not [water?] of patch cur-x cur-y [report nobody]
-   let visited-patches (list (patch cur-x cur-y))
-
-   ; -------- SPECIAL CASE: handle case where all the patches crossed by the line have the same pxcor
-   if round x1 = round x2 [
-     DEBUG-MONITOR 3 (word "Special case. All crossed patches have the same x-coordinate.")
-
-   ; inc stores the value added to y at each step. Determine whether the line segment goes up or down. If up, then inc=1 and if down then inc=-1.
-   let inc 1
-   if y2 < y1 [set inc -1]
-
-   ; visit all the patches intersected by the segment. They all have the same px-cor in this special case.
-   while [cur-y != round y2][
-     set cur-y (cur-y + inc)
-     if not [water?] of patch cur-x cur-y [report nobody]
-     set visited-patches visit (patch cur-x cur-y) visited-patches reverse?
-   ]
-   report visited-patches
-   ]
-   ; -------- END SPECIAL CASE --------------
-   ; Now hand the other cases, where the starting pxcor is different from the final pxcor. The slope can still be positive or negative
-
-   ; Before determining if this is a positive or negatively sloped line, we initialize the variables that will be used in either case.
-   ; Find the change in x, change in y, and slope of the segment,
-   let delta-x (x2 - x1)
-   let delta-y (y2 - y1)
-   let slope (delta-y / delta-x)    ; Note that the slope cannot be infinity or it would have been handled in the special case above
-
-   ; y-int is the y coordinate of where this line will cross into the next column of patches
-   let xd ((cur-x + .5) - x1)      ; xd is the x-distance from x1 to the next column
-   let y-int (y1 + xd * slope)     ; (cur-x + .5, y-int) is a coordinate where the line crosses a column
-
-   ; Test if slope is positive, or negative
-   ; If y1 <= y2, then the slope is 0 or positive, and each patch looked at is higher or to the right of the previous one
-   ; If y1 > y2, then the slope is negative and each successive patch is lower or to the right of the previous one
-   ifelse y1 <= y2 [
-     ;  --- CASE 1. POSITIVE SLOPE ---------
-     DEBUG-MONITOR 3 "Segment has non-negative slope."
-     while [y-int > (cur-y + .5)][   ; visit all the intersected patches with the starting pxcor
-       set cur-y (cur-y + 1)
-       if not [water?] of patch cur-x cur-y [report nobody]
-       set visited-patches visit (patch cur-x cur-y) visited-patches reverse?
-       DEBUG-MONITOR 2 (word "Testing patches with initial x-cor " cur-x ", " cur-y)
-     ]
-
-     ; keep incrementing cur-x by 1 and visiting all intersected patches until column before x2
-     set cur-x (cur-x + 1)                              ; update the current column
-
-     ; Special case for when the line goes through a corner of 4 patches
-     if (y-int = cur-y + .5)[
-       DEBUG-MONITOR 3 (word "Segment going through a corner between (" (cur-x - 1) "," (cur-y + 1)") and (" cur-x "," cur-y ").")
-       if ((not [water?] of patch (cur-x - 1) (cur-y + 1)) and (not [water?] of patch cur-x cur-y)) [report nobody]
-       set cur-y (cur-y + 1)
-     ]
-
-     set y-int (y-int + slope)                          ; compute the next y-intercept
-     while [cur-x < (round x2)][                        ; loop through all values of cur-x until x2
-       DEBUG-MONITOR 3 (word "Testing next x-cor " cur-x ", " cur-y)
-       if not [water?] of patch cur-x cur-y [report nobody]
-       set visited-patches visit (patch cur-x cur-y) visited-patches reverse?
-       ; loop through all pycors of intersected patches at the current x-cor
-       while [(y-int > (cur-y + .5)) and (y2 > (cur-y + .5))][
-         set cur-y (cur-y + 1)
-         DEBUG-MONITOR 3 (word "Testing patch " cur-x ", " cur-y)
-         if not [water?] of patch cur-x cur-y [report nobody]
-         set visited-patches visit (patch cur-x cur-y) visited-patches reverse?
-       ]
-       set cur-x (cur-x + 1)                              ; update to the final column
-                                                          ; Special case for when the line goes through a corner of 4 patches
-       if (y-int = cur-y + .5)[
-         DEBUG-MONITOR 3 (word "Segment going through a corner between ("  (cur-x - 1) "," (cur-y + 1)") and (" cur-x "," cur-y ").")
-         if ((not [water?] of patch (cur-x - 1) (cur-y + 1)) and (not [water?] of patch cur-x cur-y)) [report nobody]
-         set cur-y (cur-y + 1)
-       ]
-       set y-int (y-int + slope)
-     ]
-
-     while [(cur-x < (x2 + .5)) and (cur-y < (y2 + 0.5))][
-       DEBUG-MONITOR 3 (word "Testing patches with final x-cor " cur-x ", " cur-y)
-       if not [water?] of patch cur-x cur-y [report nobody]
-       set visited-patches visit (patch cur-x cur-y) visited-patches reverse?
-       set cur-y (cur-y + 1)
-     ]
-   ][ ; SYMMETRIC TO THE ABOVE FOR DOWNSLOPING SEGMENTS
-      ;  --- CASE 1. POSITIVE SLOPE ---------
-   DEBUG-MONITOR 3 "Segment has negative slope."
-   while [y-int < (cur-y - .5)][
-     set cur-y (cur-y - 1)
-     DEBUG-MONITOR 3 (word "Testing patches with initial x-cor " cur-x ", " cur-y)
-     if not [water?] of patch cur-x cur-y [report nobody]
-     set visited-patches visit (patch cur-x cur-y) visited-patches reverse?
-   ]
-   set cur-x (cur-x + 1)
-   ; Special case for when the line goes through a corner of 4 patches
-   if (y-int = cur-y - .5)[
-     DEBUG-MONITOR 3 (word "Segment going through a corner between (" (cur-x - 1) "," (cur-y - 1) ") and (" cur-x "," cur-y ").")
-     if ((not [water?] of patch (cur-x - 1) (cur-y - 1)) and (not [water?] of patch cur-x cur-y)) [report nobody]
-     set cur-y (cur-y - 1)
-   ]
-
-   set y-int (y-int + slope)
-   while [cur-x < (round x2)][
-     DEBUG-MONITOR 3 (word "Testing next x-cor " cur-x ", " cur-y)
-     if not [water?] of patch cur-x cur-y [report nobody]
-     set visited-patches visit (patch cur-x cur-y) visited-patches reverse?
-     while [(y-int < (cur-y - .5)) and (y2 < (cur-y - .5))][
-       set cur-y (cur-y - 1)
-       DEBUG-MONITOR 3 (word "Testing patch " cur-x ", " cur-y)
-       if not [water?] of patch cur-x cur-y [report nobody]
-       set visited-patches visit (patch cur-x cur-y) visited-patches reverse?
-     ]
-     set cur-x (cur-x + 1)
-     if (y-int = cur-y - .5)[
-       DEBUG-MONITOR 3 (word "Segment going through a corner between (" (cur-x - 1) "," (cur-y - 1) ") and (" cur-x "," cur-y ").")
-       if ((not [water?] of patch (cur-x - 1) (cur-y - 1)) and (not [water?] of patch cur-x cur-y)) [report nobody]
-       set cur-y (cur-y - 1)
-     ]
-     set y-int (y-int + slope)
-   ]
-   while [(cur-x < (x2 + .5)) and (cur-y > (y2 - 0.5))][
-     DEBUG-MONITOR 3 (word "Testing patch with final x-cor " cur-x ", " cur-y)
-     if not [water?] of patch cur-x cur-y [report nobody]
-     set visited-patches visit (patch cur-x cur-y) visited-patches reverse?
-     set cur-y (cur-y - 1)
-   ]
-   ]
-   report visited-patches
-end
-
-; Adds p to the list vpl.  If reverse is true, then p is added to the front of vpl (a stack or LIFO list). Otherwise it is edded to the end (a queue or FIFO list)
-to-report visit [p vpl reverse?]
-  ifelse reverse? [
-     set vpl (fput p vpl)
-  ][
-     set vpl (lput p vpl)
-  ]
-  report vpl
-end
-
-; Uses the find-line algorithm to report true if the segment from (x1,y1) to (x2,y2) passes only through water (including coastal) patches.
-; Reports false if the line passes through land patches. In the case where the line passes exactly through a corner between four patches,
-; at most one of those four patches can be land. If two or more patches are land, then the path is not navigable by a whale, and this reports false.
-to-report segment-on-water? [x1 y1 x2 y2]
-    report (find-line x1 y1 x2 y2) != nobody
-end
 
 to color-voronoi-regions
   ask patches [set pcolor voronoi-region-color]
@@ -1250,7 +988,7 @@ end
 to-report inc-shore [shore-pair dir]
   let coastal-patch item 0 shore-pair
   let shore-patch item 1 shore-pair
-  DEBUG-MONITOR 1 (word coastal-patch shore-patch)
+  DEBUG-MONITOR 3 (word coastal-patch shore-patch)
   let cx [pxcor] of coastal-patch
   let cy [pycor] of coastal-patch
   let sx [pxcor] of shore-patch
