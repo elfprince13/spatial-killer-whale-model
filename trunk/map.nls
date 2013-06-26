@@ -644,6 +644,35 @@ to test-a-path
   color-path-list path-from-patch-to-patch start-path end-path
 end
 
+to-report click-on-point
+  let x random-pxcor
+  let y random-pycor
+  watch patch x y
+
+  ; Busy wait loop so that the user presses and then releases the mouse
+  while [not mouse-down?][]
+  while [mouse-down?][
+    set x mouse-xcor
+    set y mouse-ycor
+    watch patch x y
+  ]
+  reset-perspective
+  report (list x y)
+end
+
+to test-a-segment
+  show "Select a starting point."
+  let start-point click-on-point
+  show "Select a destination point."
+  let end-point click-on-point
+  let path find-line (first start-point) (last start-point) (first end-point) (last end-point)
+  ifelse path = nobody [
+    show "Line segment cross land. No path reported."
+  ][
+    color-path-list path
+  ]
+end
+
 to color-path-list [p-list]
   foreach p-list [ask ? [set pcolor red]]
 end
