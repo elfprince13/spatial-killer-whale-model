@@ -300,9 +300,13 @@ to distribute-prey-about-patch [central-patch prey-type class-type prey-count co
   let cpc (round prey-count * coastal-prob)
   let opc prey-count - cpc ; Explicitly avoid any rounding errors
   
+  let seed find-a-shore central-patch
+  if [not water?] of central-patch [
+    set central-patch item 0 seed
+  ]
+  
   if ( cpc > 0 ) [
     let cdist distribute-discrete-easy cpc coastal-variance
-    let seed find-a-shore central-patch
     let cw-pos seed
     let ccw-pos seed
     
@@ -318,8 +322,8 @@ to distribute-prey-about-patch [central-patch prey-type class-type prey-count co
     while [counter <= center] [
       set cw-pos inc-shore cw-pos 1
       set ccw-pos inc-shore ccw-pos (-1)
-      show cw-pos
-      show ccw-pos
+      ;show cw-pos
+      ;show ccw-pos
       
       
       ask (item 0 cw-pos) [
