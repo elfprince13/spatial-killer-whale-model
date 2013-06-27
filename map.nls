@@ -1033,10 +1033,21 @@ end
 
 to-report find-a-shore [coastal-patch]
 
-  if (not ([coastal?] of coastal-patch)) [
-    DEBUG-MONITOR 1 (word coastal-patch " is not a coastal patch")
+  let shore-patch nobody
+  ifelse (not ([coastal?] of coastal-patch)) [
+    ifelse (not ([water?] of coastal-patch))[
+      DEBUG-MONITOR 1 (word coastal-patch " is not in the water, trying to find some coastline")
+      set shore-patch coastal-patch
+      set coastal-patch min-one-of (([neighbors] of shore-patch) with [coastal?]) [distance shore-patch]
+    ][
+      DEBUG-MONITOR 1 (word coastal-patch " is not a coastal patch, finding coast too")
+      set shore-patch ([nearest-land] of coastal-patch)
+      set coastal-patch min-one-of (([neighbors] of shore-patch) with [coastal?]) [distance shore-patch]
+    ]
+  ][
+    set shore-patch [nearest-land] of coastal-patch
   ]
-  report (list coastal-patch (one-of ([neighbors] of coastal-patch) with [not water?]) )
+  report (list coastal-patch shore-patch )
 end
 
 to color-a-shore [coastal-patch]
