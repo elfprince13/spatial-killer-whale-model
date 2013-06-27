@@ -290,6 +290,26 @@ to-report gaussian [x mn sd]
   report (1 / (sd * sqrt ( 2 * pi ))) * (e ^ (-0.5 * (((x - mn) / sd) ^ 2)))
 end
 
+to-report gausscdf [x mn sd]
+  set x (mn - x) / (sd * 1.414213562373)
+  let z abs x
+  let t 1. / (1 + 0.5 * z)
+  let erfcc t *  exp ( - z * z - 1.26551223 + t * (1.00002368 + t * (0.37409196 +
+            t * (0.09678418 + t * (-0.18628806 + t * (0.27886807 +
+            t * (-1.13520398 + t * (1.48851587 + t * (-0.82215223 +
+            t * 0.17087277 ))))))))) * 0.5
+  let y ifelse-value (x >= 0) [erfcc][1 - erfcc]
+  report ifelse-value (y >= 1) [1][y]
+end
+
+to-report agausscdf [x mn sd]
+  set x (mn - x) / (sd * 1.414213562373)
+  let z abs x
+  let erfcc 0.5641895835477563 * (exp ( - z * z)) / (z + (sqrt (z * z + 1.2732395447351628)))
+  let y ifelse-value (x >= 0) [erfcc][1 - erfcc]
+  report ifelse-value (y >= 1) [1][y]
+end
+
 
 to distribute-prey-about-patch [central-patch prey-type class-type prey-count coastal-prob coastal-variance openwater-variance]
   ; Assume that every coastal patch gets the same proportion of shoreline
