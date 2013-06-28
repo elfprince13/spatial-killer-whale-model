@@ -303,11 +303,71 @@ to-report gausscdf [x mn sd]
 end
 
 to-report agausscdf [x mn sd]
+  ;let erfcc 0
   set x (mn - x) / (sd * 1.414213562373)
   let z abs x
-  let erfcc 0.5641895835477563 * (exp ( - z * z)) / (z + (sqrt (z * z + 1.2732395447351628)))
+;  ifelse z < 1 [
+;    let t 1. / (1 + 0.5 * z)
+;    set erfcc t *  exp ( - z * z - 1.26551223 + t * (1.00002368 + t * (0.37409196 +
+;              t * (0.09678418 + t * (-0.18628806 + t * (0.27886807 +
+;              t * (-1.13520398 + t * (1.48851587 + t * (-0.82215223 +
+;              t * 0.17087277 ))))))))) * 0.5
+;    let y ifelse-value (x >= 0) [erfcc][1 - erfcc]
+;  ][
+    let erfcc 0.5641895835477563 * (exp ( - z * z)) / (z + (sqrt (z * z + 1.2732395447351628)))
+;  ]
   let y ifelse-value (x >= 0) [erfcc][1 - erfcc]
   report ifelse-value (y >= 1) [1][y]
+end
+
+to-report definite-integral-1 [x1 x2 mn sd]
+  let y1 gaussian x1 mn sd
+  let y2 gaussian x2 mn sd
+  let dx+ abs (x1 - x2)
+  let dy+ abs (y1 - y2)
+  report ((ifelse-value (y1 < y2) [y1][y2]) + (0.5 * dy+)) * dx+
+end
+
+to-report definite-integral-2 [x1 x2 mn sd]
+  report (gausscdf x2 mn sd) - (gausscdf x1 mn sd)
+end
+
+to-report definite-integral-3 [x1 x2 mn sd]
+  report (agausscdf x2 mn sd) - (agausscdf x1 mn sd)
+end
+
+to test-gaussian-integrals [n]
+  let t 0
+  show "testing erfc"
+  reset-timer
+  repeat n [
+    __ignore n-values 40 [(definite-integral-2 (-.125 + (? - 20) / 4) (.125 + (? - 20) / 4) 0 1)]
+  ]
+  set t timer
+  let l_erfc n-values 40 [(definite-integral-2 (-.125 + (? - 20) / 4) (.125 + (? - 20) / 4) 0 1)]
+  show t
+  
+  show "testing erfc hybrid"
+  reset-timer
+  repeat n [
+    __ignore n-values 40 [(definite-integral-3 (-.125 + (? - 20) / 4) (.125 + (? - 20) / 4) 0 1)]
+  ]
+  set t timer
+  let l_hybr n-values 40 [(definite-integral-3 (-.125 + (? - 20) / 4) (.125 + (? - 20) / 4) 0 1)]
+  show t
+  
+  show "testing trapezoid"
+  reset-timer
+  repeat n [
+    __ignore n-values 40 [(definite-integral-1 (-.125 + (? - 20) / 4) (.125 + (? - 20) / 4) 0 1)]
+  ]
+  set t timer
+  let l_trap n-values 40 [(definite-integral-1 (-.125 + (? - 20) / 4) (.125 + (? - 20) / 4) 0 1)]
+  show t
+  
+  show (map [(list ((round (100000 * ((?2 - ?1) / ?1))) / 1000) ((round (100000 * ((?3 - ?1) / ?1))) / 1000) )] l_erfc l_hybr l_trap)
+  show (map [(list ((round (100000 * (?2 - ?1))) / 1000) ((round (100000 * (?3 - ?1))) / 1000) )] l_erfc l_hybr l_trap)
+  
 end
 
 
