@@ -270,7 +270,7 @@ end
 ; horizontally, vertically, and diagonally, but never across land. It is thus an approximation of (and always at least as great as) the
 ; shortest distance a whale would actually travel to reach the given patch. Meaning that the number of patches returned will be smaller than
 ; the actual number reachable by whales traveling distance d.
-to-report water-patches-within [d exclude-coast?]
+to-report water-patches-within [d]
   set visited? 0               
   let queue (list self)
   
@@ -284,10 +284,10 @@ to-report water-patches-within [d exclude-coast?]
     if (([visited?] of p) + 1 < d) [ 
       
       ask [neighbors4] of p [
-        if water? and ((not coastal?) or (not exclude-coast?)) and (visited? < 0) [
-         let best-neighbor min-one-of neighbors with [water? and ((not coastal?) or (not exclude-coast?)) and (visited? >= 0) and (segment-on-water? ([pxcor] of myself) ([pycor] of myself) pxcor pycor )] [visited? + (distance myself)]
+        if water? and (visited? < 0) [
+         let best-neighbor min-one-of neighbors with [water? and (visited? >= 0) and (segment-on-water? ([pxcor] of myself) ([pycor] of myself) pxcor pycor )] [visited? + (distance myself)]
          set visited? ([visited? + (distance myself)] of best-neighbor)
-;         set pcolor red
+         set pcolor (pcolor + .55)
          set queue lput self queue 
         ]
       ]
@@ -300,9 +300,22 @@ to-report water-patches-within [d exclude-coast?]
 end 
 
 ; Same as above, but returns the patches in an ordered list (ordered by distance) as (patch,distance) pairs.
-to-report water-patches-within-to-list [d exclude-coast?]
-  report sort-on [visited?] water-patches-within d exclude-coast?
+to-report water-patches-within-to-list [dists filters]
+  let all-patches (water-patches-within (max dists))
+  ask all-patches [set visited? round visited?]
+  let patch-subsets map [all-patches with [(runresult ? self)]] filters
+  report (list all-patches (map subset-at-dist patch-subsets dists))
 end 
+
+to-report count-listed-patchset [l]
+  report map [count ?] l
+end
+
+to-report subset-at-dist [parent-set dist]
+  let indices n-values (dist + 1) [?]
+  report map [parent-set with [visited? = ?]] indices
+end
+
 
 ; Draw the map according to the seletion of the map-mode selector on the user interface
 to redraw
