@@ -1,0 +1,177 @@
+; Procedures and reporters for dealing with the whale memory model
+; Matthew Dickerson
+; v1.0  July 1, 2013
+
+; The days-per-hunting-season global slider divides the year up into number-hunting-seasons "whale hunting seasons", where
+; number-hunting-seasons = ceiling ( 365 / days-per-hunting-season ). Each season except possible the last has days-per-period days.
+; 
+; The whales instance variable memory contains the whale's memory of past hunting experience based on these whale hunting seasons 
+; and whale hunting regions.  
+; That is, memory contains all of a whale's temporal-spatial memory entries, with memory[i] containing a list of memories for season i.
+; Specifically, for 0 ≤ i < num-seasons, memory[i] (or entry i in memory) contains a list of memory triples for season i.  
+; For each hunting region (not for each patch) a whale has hunted during season i, we have one triple (r,h,w) where:
+;    r is the index of the region, 
+;    h is the total number of hours hunted,
+;    w is the total mass of prey consumed. 
+; Each list is sorted increasing order by r. 
+; Note that a whale has a list for each season in the year. But within each list, only hunting regions
+; where a whale has actually hunted during that season is explicitly listed.
+
+
+;; === OBSERVER PROCEDURES FOR INITIALIZATION =====
+; Give all the living whales an empty hunting member, which is a list of empty lists -- one empty list for each hunting season
+to reset-memory-of-all-whales
+  ; Create a list of the correct length: a list of empty lists. 
+  let empty-memory (list )
+  repeat number-hunting-seasons [set empty-memory fput [] empty-memory]
+  
+  ; Copy that list to each whale's memory.
+  ask whales [set memory empty-memory]
+end
+
+; For each hunting season, give each whale a memory of hunting in a certain number of regions .
+to initialize-random-whale-memories [ num-regions ]
+  let season-number 0
+  repeat number-hunting-seasons [
+     repeat num-regions [
+       let d random-day-in-season season-number
+       let pt random num-prey-types
+       ;; For the given prey type pt and the given day d, compute hot-spot and expected-counts where..
+       ;; hot-spot is a patch 
+       ;; expected-counts is a list of rough estimate of how many prey of each class would end up in that patch after distribution during day d
+       ;;
+       ;; compute kg that this whale would consume if it hunted with the expected prey-counts
+       ;; add a 1-hour record for the given season, hunting-region, and estimated kg-consumed
+     ]
+     set season-number (season-number + 1) 
+  ]
+end
+
+
+; === INDIVIDUAL WHALE HUNTING MEMORY PROCEDURES AND REPORTERS
+
+; Update this whale's memory to indicate that it hunted IN ITS CURRENT PATCH AND HUNTING REGION for one hour, and got the given mass (kg) of prey.
+to update-whale-memory-here-and-now [kg]
+  let season hunting-season-of-day days                         ; Get the index of the current hunting season
+  update-whale-memory season hunting-region kg
+end
+
+; Update this whale's memory to indicate that it hunted during seasion sn in the given hunting region for one hour, and consumed the mass (kg-consumed) of prey.
+; Parameters:
+;    sn -- the season during which this whale hunted
+;    region -- the hunting region in which this whale hunted
+;    kg-consumed -- the mass of prey consumed by the whale in this hunting event.
+to update-whale-memory [sn h-region kg-consumed]
+  let season-memory (item sn memory)                ; Get the memory record for this season for the memory list for all seasons
+  
+  ; special case: this is the first entry into the whale's memory for this season
+  ifelse length season-memory = 0 [
+    set season-memory (list (list h-region 1 kg-consumed))
+  ]
+  [ ; Assume the whale already has at least one memory record for this season 
+    let i index-in-memory season-memory h-region  ; Within the memory of this whale for this season, get the index of the record for the current region   
+    ; If the reported i < 0, then the whale has not hunted here during this season and a new record is needed. The correction location is -i+1.
+    ; If i≥0, then a record exists to be updated.
+    ifelse (i < 0) [                                  ; Whale has never hunted in this region during this season. Add a new memory record
+      ; The new memory record should be at triple of the form [hunting-region 1 kg] since it has hunted here for 1 hour and gotten kg of mass of prey
+      set i (abs i) - 1                               ; Insert into the seasonal memory list an entirely new regional hunting memory
+      let L1 sublist season-memory  0 i               ; We insert the new entry at index i. Everything previously with index ≥ i shifts one to the right.
+      set L1 lput (list h-region 1 kg-consumed) L1       
+      let L2 sublist season-memory i (length season-memory) 
+      set season-memory sentence L1 L2 
+    ][
+    let h (1 + (item 1 (item i (season-memory))))       ; increment the total number of hours the whale has hunted in this region in this season 
+    let w (kg-consumed + (item 2 (item i (season-memory))))       ; increment by kg the total mass consumed by the whale while hunting in this region in this season    
+    set season-memory replace-item i season-memory (list h-region h w)                          
+    ]
+  ]
+  
+  ; Once the seasonal memory for one season has been updated, replace the updated version back into the memory list for all seasons.
+  set memory replace-item sn memory season-memory
+end
+
+; sm is a seasonal memory list: a single list of triples of hunting memory records
+;    -- The first item in a triple is the index of the region. 
+; h-region is the target value: it is the index of a particular hunting region that we are looking for in sm
+; Binary search sm for record hr. 
+; Reporting a positive integer i indicates the region was found. Everything with index less than i has a hunting reggion less than h-region
+; Reporting a negative number indicates the region was not found in the seasonal memory, in which case 1 + absolute value of the reported value i
+; indicates where a new record with the given hunting region _should_ go. That is, we report -i-1.
+to-report index-in-memory [sm h-region]
+  ; s and f are the indices of the current bounds of the binary search
+  ; If hr is in list sm, the index falls in the range s..f
+  let f (length sm - 1)
+  if f < 0 [report -1]         ; list is empty. new item shoudl go at position 0.  So report -0 - 1
+  let s 0     
+  
+  ; When s>f, we have failed to find the target-region in the list.  s is where it should go.
+  while [s <= f][
+    let mid floor ((s + f) / 2)                           ; Divide the list in half for binary search, and eliminate one half
+    if (first (item mid sm)) = h-region [report mid]      ; If the middle of the list is the item we want, then we are done.
+    ifelse (first (item mid sm)) < h-region               ; In binary search, we throw out half of the list...
+      [set s mid + 1]                                     
+      [set f mid - 1]                                      
+  ]
+  report -1 - s                                           ; item not found. 
+end
+
+; For the current hunting season
+to-report expected-hourly-mass-by-region [h-region]
+  report expected-hourly-mass-by-season-and-region (hunting-season-of-day days) h-region
+end
+
+; For an arbitrary hunting season
+to-report expected-hourly-mass-by-season-and-region [season h-region]
+  let i index-in-memory (item season memory) h-region
+  ifelse i < 0  [ 
+    report 0 
+  ][ 
+    let total-hours (item 1 (item i (item season memory)))
+    let total-mass (item 2 (item i (item season memory))) 
+    report total-mass / total-hours
+  ]
+end
+
+;; ; reports a number corresponding to the weighted benefit of traveling to the specified hunting region hr to hunt.  Takes into account:
+;1.  memory of past success at that location during this season
+;2.  distance to travel
+;3.  current condition (body mass, health, ability to travel)
+to-report evaluate-hunting-at [h-region]
+  let ehm expected-hourly-mass-by-region h-region
+  let ed estimated-distance-to h-region
+
+end
+
+; ===================== LOW LEVEL PROCEDURES AND REPORTERS =================
+
+; PATCH CONTEXT
+; Report the approximate distance (in kms) from this patch to the given hunting region h-region. 
+; This is the Euclidean distance from this patch to its nearest node on the travel graph plus the graph distance from that node to the
+; the anchor node that defines the hunting region.   Note that some patches in that hunting region will be closer, and some 
+; will be farther. 
+to-report estimated-distance-to [h-region]
+   ; compute in NetLogo patch units and convert to kms at the end.   
+   let to-graph distance nearest-node                        ;  The euclidean distance to the nearest-node on the graph. Actually travel distance may be farther.
+   let along-graph [item h-region distlist] of nearest-node  ;  The distance along the graph from nearest-node to anchor-node hr
+   report kmpp * (to-graph + along-graph)
+end
+
+; OBSERVER CONTEXT
+; Given a day d, what is the index of the hunting season. This is used to access the appropriate entry in a whale's memory
+to-report hunting-season-of-day [d]
+  report floor (d / days-per-hunting-season)
+end
+
+; Report a random day number in the given season numbered sn
+to-report random-day-in-season [sn]
+  let start-day sn * days-per-hunting-season
+  let num-days days-per-hunting-season
+  if sn = number-hunting-seasons [ set num-days 365 - start-day ]   ; Special case when the season is the last one of the year and might be shorter.
+  report (start-day + random num-days)
+end
+
+
+; How many hunting seasons are there? This is the lenght of the list that is the whale memory.
+to-report number-hunting-seasons
+  report ceiling (365 / days-per-hunting-season)
+end
