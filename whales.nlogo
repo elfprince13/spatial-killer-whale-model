@@ -559,7 +559,7 @@ to seek-food
   RUN-MONITOR 1  " is seeking food"
   let travel-radius (whale-speed / kmpp)                                       ; distance in patches a whale can travel in one hour
   let group-size (sum [effective-size] of group)
-  let best-nearby max-one-of other water-patches-within travel-radius false [food-rating group-size]  ; patch in that radius with the most food
+  let best-nearby max-one-of other water-patches-within travel-radius [food-rating group-size]  ; patch in that radius with the most food
   
   ;If there is a patch within one time-unit of travel with enough food, then travel to that patch. Otherwise seek a more global solution.
   ;Note that if the whale was on long distance travel mode when it found local food, then the travel destination and path should be cleared.

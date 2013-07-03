@@ -166,6 +166,9 @@ end
 ; distrubution percentages given in the distribution-counts and distributions data structures for the season that includes the given day number.
 ; Decrement from GLOBAL-POP# all distributed prey. If the total proportions at all locations is <1.0 then some prey should  remain in GLOBAL-POP# as off-world.
 to seasonal-distribution [prey-type day-of-year]
+  
+  ask water [set visited? -1] ; this should be done in the calling function instead, when done with debugging
+  
   DEBUG-MONITOR 0 (word "Seasonal distribution for prey-type " prey-type ", " (item NAME# (item prey-type prey-data)) " on season including day " day-of-year) 
   RUN-MONITOR 1 (word "Seasonal distribution for " (item NAME# (item prey-type prey-data)) " on day " day-of-year)
   
@@ -181,45 +184,67 @@ to seasonal-distribution [prey-type day-of-year]
   let ct-locations (item season-index (item prey-type distribution-counts))   ; The number of locations for distribution for this prey type an this season
   DEBUG-MONITOR 2 (word "There are " ct-locations " locations for this prey type.")
   
-  let class-num 0                                                      ; Index of the current age class to be processed
-  repeat ct-classes [                                                  ; Loop through all age classes for this type
-     let prey-list (item prey-type hunting-data)                       ; Extract from hunting data the list of data for this prey type
-     let class-list (item class-num prey-list)                         ; Extract from list of data for this prey type the list of data for this age class
-     let members (item GLOBAL-POP# class-list)                         ; Get the number of prey of this age class in the total population
-     DEBUG-MONITOR 2 (word "Distributing age class " class-num " with " members " individuals.")
+  ; task 0 matches coastal patches
+  ; task 1 matches non coastal patches
+  let coastal-filters (list (task [[coastal?] of ?]) (task [[not coastal?] of ?]))
+  
+  let loc 0                                                         ; Index of the current location to be processed
+  ; Loop through all locations to distribute the numbers of prey of this age class
+  repeat ct-locations [                                             
+    let this-loc (item loc (item season-index (item prey-type distributions)))   ; distributions[i][j][k] is the kth location for season j for prey type i
+    ; list contains long lat age-class-percentages-for-all-age-classes p-coastal coastal-sd offshore-sd
+    let long (item 0 this-loc)
+    let lat (item 1 this-loc)
+    let central-patch long-lat-patch long lat
+    let len (length this-loc)
+    let p-coastal (item (len - 3) this-loc)
+    let coastal-sd (item (len - 2) this-loc)
+    let offshore-sd (item (len - 1) this-loc)
+          
+    let seed find-a-shore central-patch
+    
+    ;;;;;;;;;;;;;;;;;
+    ;; Talk to Ward about whether or not this is a reasonable thing to do!
+    ;; (or whether data should be tweaked)
+    ;if [not water?] of central-patch [
+      set central-patch item 0 seed
+    ;]
+    ;;;;;;;;;;;;;;;;;
+    
+    
+    let patch-sd-list (list (coastal-sd / kmpp) (offshore-sd / kmpp))
+    let p-list (list p-coastal (1 - p-coastal))
+    
+    let prey-patches [water-patches-within-to-list (map [round (? * 2.5)] patch-sd-list) coastal-filters] of central-patch
+    let listed-prey-patches (item 1 prey-patches)
+    set prey-patches (item 0 prey-patches)
+    let loc-distributions (map [segment-weighted-gaussian (round ?1) (split-distribution count-listed-patchset ?2)] patch-sd-list listed-prey-patches)
+    
+    let class-num 0                                                      ; Index of the current age class to be processed
+    repeat ct-classes [                                                  ; Loop through all age classes for this type
+      let prey-list (item prey-type hunting-data)                       ; Extract from hunting data the list of data for this prey type
+      let class-list (item class-num prey-list)                         ; Extract from list of data for this prey type the list of data for this age class
+      let members (item GLOBAL-POP# class-list)                         ; Get the number of prey of this age class in the total population
+      DEBUG-MONITOR 2 (word "Distributing age class " class-num " with " members " individuals.")
+           
+      let prop-here (item (class-num + 2) this-loc)                      ; Proportion of total population to distribute around this area for this age class
+      let num-here round (prop-here * members)                           ; Total number to go here based on percental of total population of this age class
+      let i-num-here ifelse-value((members - num-here) < 0) [members][num-here]                                      ; compute the integer version.
+      DEBUG-MONITOR 2 (word this-loc " will get " prop-here " of the total members of this age class, which is " i-num-here " individuals.")
 
-
-     let total-distributed 0                                           ; Keep track of how many prey of this class are distributed
-     let loc 0                                                         ; Index of the current location to be processed
-     ; Loop through all locations to distribute the numbers of prey of this age class
-     repeat ct-locations [                                             
-       let this-loc (item loc (item season-index (item prey-type distributions)))   ; distributions[i][j][k] is the kth location for season j for prey type i
-       ; list contains long lat age-class-percentages-for-all-age-classes p-coastal coastal-sd offshore-sd
-       let long (item 0 this-loc)
-       let lat (item 1 this-loc)
-       let central-patch long-lat-patch long lat
-       let len (length this-loc)
-       let p-coastal (item (len - 3) this-loc)
-       let coastal-sd (item (len - 2) this-loc)
-       let offshore-sd (item (len - 1) this-loc)
+      distribute-prey-about-patch prey-type class-num i-num-here central-patch p-list listed-prey-patches loc-distributions
        
-       let prop-here (item (class-num + 2) this-loc)                      ; Proportion of total population to distribute around this area for this age class
-       let num-here prop-here * members                                   ; Total number to go here based on percental of total population of this age class
-       let i-num-here (int num-here)                                      ; compute the integer version.
-       let frac (num-here - i-num-here)
-       if random-float 1.0 < frac [set i-num-here (i-num-here + 1)]       ; probabilistically round up or down
-       DEBUG-MONITOR 2 (word this-loc " will get " prop-here " of the total members of this age class, which is " i-num-here " individuals.")
-
        
-       distribute central-patch prey-type class-num i-num-here p-coastal coastal-sd offshore-sd
-       set total-distributed (total-distributed + i-num-here)
-       set loc (loc + 1)
-     ]
-     set members (members - total-distributed)                            ; Must update the GLOBAL-POP# field for this prey. Should keep a count of undistributed prey.
-     set class-list replace-item GLOBAL-POP# class-list members
-     set prey-list replace-item class-num prey-list class-list 
-     set hunting-data replace-item prey-type hunting-data prey-list
-     set class-num (class-num + 1) 
+      set members (members - i-num-here)                            ; Must update the GLOBAL-POP# field for this prey. Should keep a count of undistributed prey.
+      set class-list replace-item GLOBAL-POP# class-list members
+      set prey-list replace-item class-num prey-list class-list 
+      set hunting-data replace-item prey-type hunting-data prey-list
+      set class-num (class-num + 1) 
+    ]
+    
+    ask prey-patches [set visited? -1]
+       
+    set loc (loc + 1)
   ]
 end
 
@@ -236,20 +261,6 @@ to-report get-season-from-day [prey-type day-of-year]
     ]
   ]
   report season-index
-end
-
-;;  DISTRIBUTE PREY AROUND A GIVEN PATCH WITH DENSITY IN A NORMAL/GUASSIAN DISTRIBUTION
-; p is the patch around which prey are to be distribution
-; pry is the number of the prey-type
-; cls is the number of the age-class of the given prey-type
-; n is an integer representing the total number to be distributed. When this procedure is done, the total of test-value for all patches should be n.
-; The total of test-value for coastal patches should be ~ n * p-coast.
-; The total of test-value for open-water patches should be ~ n * (1 - p-coast)
-; The total of test-value for coastal patches within distance sd-coast of p should be ~ 1 standard deviation of n * p-coast
-; The total of test-value for open-water patches within distance sd-water of p should be ~ 1 standard deviation of n * (1 - p-coast)
-
-to distribute [center-patch pry cls n p-coast sd-coast sd-water] 
-  distribute-prey-about-patch center-patch pry cls n p-coast (sd-coast * sd-coast) (sd-water * sd-water)
 end
 
 ; Context: ONE PATCH
@@ -290,37 +301,7 @@ to-report gaussian [x mn sd]
   report (1 / (sd * sqrt ( 2 * pi ))) * (e ^ (-0.5 * (((x - mn) / sd) ^ 2)))
 end
 
-to-report gausscdf [x mn sd]
-  set x (mn - x) / (sd * 1.414213562373)
-  let z abs x
-  let t 1. / (1 + 0.5 * z)
-  let erfcc t *  exp ( - z * z - 1.26551223 + t * (1.00002368 + t * (0.37409196 +
-            t * (0.09678418 + t * (-0.18628806 + t * (0.27886807 +
-            t * (-1.13520398 + t * (1.48851587 + t * (-0.82215223 +
-            t * 0.17087277 ))))))))) * 0.5
-  let y ifelse-value (x >= 0) [erfcc][1 - erfcc]
-  report ifelse-value (y >= 1) [1][y]
-end
-
-to-report agausscdf [x mn sd]
-  ;let erfcc 0
-  set x (mn - x) / (sd * 1.414213562373)
-  let z abs x
-;  ifelse z < 1 [
-;    let t 1. / (1 + 0.5 * z)
-;    set erfcc t *  exp ( - z * z - 1.26551223 + t * (1.00002368 + t * (0.37409196 +
-;              t * (0.09678418 + t * (-0.18628806 + t * (0.27886807 +
-;              t * (-1.13520398 + t * (1.48851587 + t * (-0.82215223 +
-;              t * 0.17087277 ))))))))) * 0.5
-;    let y ifelse-value (x >= 0) [erfcc][1 - erfcc]
-;  ][
-    let erfcc 0.5641895835477563 * (exp ( - z * z)) / (z + (sqrt (z * z + 1.2732395447351628)))
-;  ]
-  let y ifelse-value (x >= 0) [erfcc][1 - erfcc]
-  report ifelse-value (y >= 1) [1][y]
-end
-
-to-report definite-integral-1 [x1 x2 mn sd]
+to-report sum-gaussian-cdf-cell [x1 x2 mn sd]
   let y1 gaussian x1 mn sd
   let y2 gaussian x2 mn sd
   let dx+ abs (x1 - x2)
@@ -328,281 +309,189 @@ to-report definite-integral-1 [x1 x2 mn sd]
   report ((ifelse-value (y1 < y2) [y1][y2]) + (0.5 * dy+)) * dx+
 end
 
-to-report definite-integral-2 [x1 x2 mn sd]
-  report (gausscdf x2 mn sd) - (gausscdf x1 mn sd)
-end
+;;  DISTRIBUTE PREY AROUND A GIVEN PATCH WITH DENSITY IN A NORMAL/GAUSSIAN DISTRIBUTION
+; prey-type is the number of the prey-type
+; classs is the number of the age-class of the given prey-type
+; prey-count is an integer representing the total number to be distributed.
+; p is the patch around which prey are to be distribution
+; The total of test-value for coastal patches should be ~ n * p-coast.
+; The total of test-value for open-water patches should be ~ n * (1 - p-coast)
+; The total of test-value for coastal patches within distance sd-coast of p should be ~ 1 standard deviation of n * p-coast
+; The total of test-value for open-water patches within distance sd-water of p should be ~ 1 standard deviation of n * (1 - p-coast)
 
-to-report definite-integral-3 [x1 x2 mn sd]
-  report (agausscdf x2 mn sd) - (agausscdf x1 mn sd)
-end
-
-to test-gaussian-integrals [n]
-  let t 0
-  show "testing erfc"
-  reset-timer
-  repeat n [
-    __ignore n-values 40 [(definite-integral-2 (-.125 + (? - 20) / 4) (.125 + (? - 20) / 4) 0 1)]
-  ]
-  set t timer
-  let l_erfc n-values 40 [(definite-integral-2 (-.125 + (? - 20) / 4) (.125 + (? - 20) / 4) 0 1)]
-  show t
-  
-  show "testing erfc hybrid"
-  reset-timer
-  repeat n [
-    __ignore n-values 40 [(definite-integral-3 (-.125 + (? - 20) / 4) (.125 + (? - 20) / 4) 0 1)]
-  ]
-  set t timer
-  let l_hybr n-values 40 [(definite-integral-3 (-.125 + (? - 20) / 4) (.125 + (? - 20) / 4) 0 1)]
-  show t
-  
-  show "testing trapezoid"
-  reset-timer
-  repeat n [
-    __ignore n-values 40 [(definite-integral-1 (-.125 + (? - 20) / 4) (.125 + (? - 20) / 4) 0 1)]
-  ]
-  set t timer
-  let l_trap n-values 40 [(definite-integral-1 (-.125 + (? - 20) / 4) (.125 + (? - 20) / 4) 0 1)]
-  show t
-  
-  show (map [(list ((round (100000 * ((?2 - ?1) / ?1))) / 1000) ((round (100000 * ((?3 - ?1) / ?1))) / 1000) )] l_erfc l_hybr l_trap)
-  show (map [(list ((round (100000 * (?2 - ?1))) / 1000) ((round (100000 * (?3 - ?1))) / 1000) )] l_erfc l_hybr l_trap)
-  
-end
-
-
-to distribute-prey-about-patch [central-patch prey-type class-type prey-count coastal-prob coastal-variance openwater-variance]
-  ; Assume that every coastal patch gets the same proportion of shoreline
-  ; from adjacent (diagonals included) patches.
-  ; This effectively adds a half-patch wide buffer to all shorelines
-  ; (try drawing it out to see what is meant)
-  
-  let cpc (round prey-count * coastal-prob)
-  let opc prey-count - cpc ; Explicitly avoid any rounding errors
-  
-  let seed find-a-shore central-patch
-  if [not water?] of central-patch [
-    set central-patch item 0 seed
-  ]
-  
-  if ( cpc > 0 ) [
-    let cdist distribute-discrete-easy cpc coastal-variance
-    let cw-pos seed
-    let ccw-pos seed
+to distribute-prey-about-patch [prey-type class-type prey-count central-patch probabilities distribution-patchsets distribution-cells]  
+  ; Assume probabilities has been properly normalized
+  let patch-type-counter 0
+  let num-patch-types length probabilities
+  let prey-remaining prey-count
+  ; Can't nest reporter-tasks, so foreach is out :(
+  repeat num-patch-types [
     
-    let center (((length cdist) - 1) / 2)
-    let counter 1
-    show cdist
-    show sum cdist
-    let cdistd 0
-    ask central-patch [
-      add-to-prey-class-count prey-type class-type (item center cdist)
-      set cdistd cdistd + (item center cdist)
-    ]
-    while [counter <= center] [
-      set cw-pos inc-shore cw-pos 1
-      set ccw-pos inc-shore ccw-pos (-1)
-      ;show cw-pos
-      ;show ccw-pos
-      
-      
-      ask (item 0 cw-pos) [
-        add-to-prey-class-count prey-type class-type (item (center + counter) cdist)
-        set cdistd cdistd + (item (center + counter) cdist)
-      ]
-      
-      ask (item 0 ccw-pos) [
-        add-to-prey-class-count prey-type class-type (item (center - counter) cdist)
-        set cdistd cdistd + (item (center - counter) cdist)
-      ]
-      
-      set counter counter + 1 
-    ]
-    show cdistd
-  ]
-  
-  if ( opc > 0 ) [
+    let pc ifelse-value ((1 + patch-type-counter) < num-patch-types)[ round (prey-count * (item patch-type-counter probabilities)) ][ prey-remaining]
+    set prey-remaining (prey-count - pc)
     
-    let odistd 0
-    
-    ; Calculate the length of one standard deviation in (rounded) patch-units
-    let sd-patches ((sqrt openwater-variance) / kmpp)
-    ; Preserve symmetry: We can make an even number of corrections to 
-    ; an odd number of cells, but we can't make an odd number of corrections to an
-    ; even number of cells
-    ; This approximation should be quite harmless at a scale ~ 0.6 kmpp
-    ; and as sigma gets larger (because the abs(error) is bounded to 1 patch per sigma)
-    set sd-patches (2 * (round ((sd-patches + 1) / 2))) - 1
-    
-    let prey-patches [water-patches-within (3.5 * sd-patches) false] of central-patch
-    ask prey-patches [ set visited? round visited? ]
-    let patch-counts (list
-      (count prey-patches with [visited? <= 0.5 * sd-patches])
-      (count prey-patches with [(visited? > 0.5 * sd-patches) and (visited? <= 1.5 * sd-patches)])
-      (count prey-patches with [(visited? > 1.5 * sd-patches) and (visited? <= 2.5 * sd-patches)])
-      (count prey-patches with [visited? > 2.5 * sd-patches])
-    )
-    
-    set patch-counts (list 
-      ((item 3 patch-counts) / 2) ((item 2 patch-counts) / 2) ((item 1 patch-counts) / 2) 
-      (item 0 patch-counts) ((item 1 patch-counts) / 2) ((item 2 patch-counts) / 2) ((item 3 patch-counts) / 2) 
-    )
-    
-    let odist distribute-discrete opc openwater-variance patch-counts
-    show odist
-    show sum odist
-    
-    let odist-fold fold-distribution odist (floor ((length odist) / 2))
-    show odist-fold
-    show sum odist-fold
-    let odistm 0
-    (foreach odist-fold (n-values (length odist-fold) [?]) [
-        let near-patches prey-patches with [visited? = ?2]
-        ifelse ((count near-patches) > 0) [
-          let per-patch (floor (?1 / (count near-patches)))
-          let patch-remainder (?1 mod (count near-patches))
+    if (pc > 0) [
+      let cur-patchsets item patch-type-counter distribution-patchsets
+      let cur-distribution item patch-type-counter distribution-cells
+      set cur-distribution (distribute-discrete pc cur-distribution) 
+      set cur-distribution fold-distribution cur-distribution (floor ((length cur-distribution) / 2))
+      set cur-patchsets sublist cur-patchsets 0 length cur-distribution
+            
+      (foreach cur-distribution cur-patchsets [
+        let near-patches count ?2
+        ifelse (near-patches > 0) [
+          let per-patch (floor (?1 / near-patches))
+          let patch-remainder (?1 mod near-patches)
           if (per-patch > 0) [
-            ask near-patches [
+            ask ?2 [
               add-to-prey-class-count prey-type class-type per-patch
-              set odistd (odistd + per-patch)
+              ;set odistd (odistd + per-patch)
             ]
           ]
-          ask n-of patch-remainder near-patches [
+          ask n-of patch-remainder ?2 [
               add-to-prey-class-count prey-type class-type 1
-              set odistd (odistd + 1)
+              ;set odistd (odistd + 1)
           ]
         ][
-          show (WORD "No patches at distance " ?2)
-          set odistm (odistm + ?1)
-          
+          if (?1 > 0) [ show (WORD "No patches at distance for patchset " ?2 " (missing " ?1 " prey )") ]
+          ;set odistm (odistm + ?1)
         ]
-    ])
-    show odistd
-    show odistm
-    ask prey-patches [set visited? -1]
+      ])
+      
+    ]
     
+    set patch-type-counter 1 + patch-type-counter
   ]
   
 end
 
-to-report distribute-discrete [prey-count prey-variance areal-weights]  
-  ; Effectively, we're distributing out to 3.5 standard deviations on either side
-  ; using pre-computed integrals of the Gaussian pdf. Integral boundaries are half-sd aligned
-  ; and of unit-width
+to-report segment-weighted-gaussian [sd-patches areal-weights]
+  ; Remember to preserve symmetry: We can make an even number of corrections to 
+  ; an odd number of cells, but we can't make an odd number of corrections to an
+  ; even number of cells
+  
+  let cell-count length areal-weights
+  
+  let half-patch-sigma 0.5 / sd-patches
+  
+  let ds floor (cell-count / 2)
+  
+  let normal-distribution n-values cell-count [sum-gaussian-cdf-cell ((? - ds) - half-patch-sigma) ((? - ds) + half-patch-sigma) 0 sd-patches]
+  ; guarantee symmetry by averaging left and right halves of distribution
+  ; these should have been approximately equal either way, 
+  ; but we don't want to trust rounding to luck
+  set normal-distribution (map [((?1 + ?2) * 0.5)] normal-distribution (reverse normal-distribution))
+  DEBUG-MONITOR 2 normal-distribution
+  
   
   ; areal-weights must be symmetric or certain assumptions are likely to become problematic
   ; however, we'll take care of normalization
-  let normal-distribution [0.8 6 24.1 38.2 24.1 6 0.8]
-  set normal-distribution (map [(?1 * ?2) ] normal-distribution areal-weights)
-  let norming-factor (sum normal-distribution) / 100
-  set normal-distribution (map [(?1 / norming-factor) ] normal-distribution)
-  DEBUG-MONITOR 2 normal-distribution
-  DEBUG-MONITOR 2 (WORD (sum normal-distribution) "/" 100)
+  let final-distribution (map [(?1 * ?2) ] normal-distribution areal-weights)
+  let norming-factor (sum final-distribution)
+  set final-distribution (map [(?1 / norming-factor) ] final-distribution)
+  DEBUG-MONITOR 2 final-distribution
+  DEBUG-MONITOR 2 (WORD (sum final-distribution) "/" 1)
   
-  ; Calculate the length of one standard deviation in (rounded) patch-units
-  let sd-patches ((sqrt prey-variance) / kmpp)
-  ; Preserve symmetry: We can make an even number of corrections to 
-  ; an odd number of cells, but we can't make an odd number of corrections to an
-  ; even number of cells
-  ; This approximation should be quite harmless at a scale ~ 0.6 kmpp
-  ; and as sigma gets larger (because the abs(error) is bounded to 1 patch per sigma)
-  set sd-patches (2 * (round ((sd-patches + 1) / 2))) - 1
-  DEBUG-MONITOR 2 sd-patches
+  report final-distribution
+end
+
+to-report distribute-discrete [prey-count weighted-gaussian]
+  
   
   ; Of the prey distributed on coast, how many fall into each cell of our integrated Gaussian?
   ; Start with a rounded estimate
-  let prey-per map [round ((? * prey-count) / 100)] normal-distribution
-  
-  ; And then calculate the rounding error
-  let prey-remaining (prey-count - (sum prey-per))
-  
-  ; Compensate the central value by the rounding error
-  ; and drop cells whose expected populations are negligible
-  ; (for later efficiency)
-  set prey-per replace-item 3 prey-per ((item 3 prey-per) + prey-remaining)
-  let zeroes map [? = 0] prey-per
-  let non-zero position false zeroes
-  ifelse (non-zero != false) [
-    ; Assume symmetry for speed-sake
-    set prey-per sublist prey-per non-zero (7 - non-zero) 
-  ] [
-    DEBUG-MONITOR 2 "Somebody asked us to distribute no prey (1)! Something might be wrong"
-    set prey-per [0]
-  ] 
-  let num-sd length prey-per
-  DEBUG-MONITOR 2 prey-per
-  DEBUG-MONITOR 2 (WORD (sum prey-per) "/" prey-count)
-  
-  ; Redistribute the population within each integrated cell 
-  ; by calculating the conversion from SD-units to patch-units
-  let final-distribution (n-values (sd-patches * num-sd) [round ((item (int (? / sd-patches)) prey-per) / sd-patches)])
-  let covered-patch-count length final-distribution
+  let final-distribution map [round (? * prey-count)] weighted-gaussian
+  let cell-count length weighted-gaussian
+  let ds floor (cell-count / 2)
   DEBUG-MONITOR 2 final-distribution
   
-  ; Calculate the new rounding error on a per-cell basis
-  set prey-remaining (map [?1 - ?2] prey-per (n-values num-sd [sum (sublist final-distribution (sd-patches * ?) (sd-patches * (? + 1)))]))
-  DEBUG-MONITOR 3 prey-remaining
-  ; Replicate the rounding error value into a list with entries for every patch
-  set prey-remaining (n-values covered-patch-count [item (int (? / sd-patches)) prey-remaining])
+  ; And then calculate the rounding error
+  let prey-remaining (prey-count - (sum final-distribution))
+  DEBUG-MONITOR 2 prey-remaining
+  
+  
+  ; Drop cells whose expected populations are negligible
+  ; for later efficiency and to prevent negatively weighted cells
+  let zeroes map [? = 0] final-distribution
+  let non-zero position false zeroes
+  if ( prey-remaining < 0 )[
+    ifelse (non-zero != false) [
+      ; Should be symmetric anyway, assuming so offers a small speedup
+      set final-distribution sublist final-distribution non-zero (cell-count - non-zero) 
+    ] [
+      DEBUG-MONITOR 2 "Somebody asked us to distribute no prey (1)! Something might be wrong"
+      set final-distribution [0]
+    ]  
+    set cell-count length final-distribution
+    set ds floor (cell-count / 2)
+  ]
   
   ; Calculate the absolute distance from the center of a list with length matching final-distribution
-  let g-center-dist (n-values covered-patch-count [ abs (int (? - ((covered-patch-count - 1) / 2))) ])
-  
-  ; Recalculate to cell-local distances, saving both the interior and exterior distances for that cell,
-  ; This is done such that the distances count from the center of the overall list, but are reset when crossing
-  ; cell boundaries.
+  ; Save both the interior and exterior distances for that cell,
   ; The "exterior distance" (saved in inv-center-dist) counts from outer boundaries towards the center
   ; The "interior distance" counts from the center towards outer boundaries
-  let center-dist (map [remainder (? - (int ((sd-patches + 1) / 2))) sd-patches ] g-center-dist)
-  let inv-center-dist (map [ifelse-value (? >= 0) [ (sd-patches - ?)][ (- (sd-patches mod 2)) - (2 * ?)  ]] center-dist)
-  set center-dist (map [ifelse-value (? >= 0) [ ? + 1 ][ 2 * (?  + 1 + (sd-patches / 2)) ]] center-dist)
-  DEBUG-MONITOR 3 center-dist
+  let g-center-dist (n-values cell-count [ 1 + 2 * (abs (? - ds)) ])
+  let inv-center-dist (map [ 1 + (cell-count - ?)] g-center-dist)
+  DEBUG-MONITOR 3 g-center-dist
   DEBUG-MONITOR 3 inv-center-dist
   
-  ; Compensate final-distribution based on the rounding error and cell-local distances
+    
+  ; Compensate final-distribution based on the rounding error and cell distances
   ; If the rounding error is positive, compensate downwards in the outermost cells
   ; If the rounding error is negative, compensate upwards in the innermost cells
   set final-distribution (map [
-      ifelse-value (?2 = 0) [
+      ifelse-value (prey-remaining = 0) [
          ?1
         ][
-          ifelse-value (?2 < 0) [
-            ifelse-value ((abs ?2) >= ?4) [
+          ifelse-value (prey-remaining < 0) [
+            ifelse-value ((abs prey-remaining) >= ?3) [
               ?1 - 1
             ][
-              ifelse-value (((?2 mod 2) != 0) and (?5 = 0)) [ ?1 + 1 ][ ?1 ] 
+              ifelse-value (((prey-remaining mod 2) != 0) and (?2 = 1)) [ ?1 + 1 ][ ?1 ] 
             ] 
           ][ 
-            ifelse-value (?2 >= ?3) [
-               ifelse-value (((?2 mod 2) = 0) and (?5 = 0)) [ ?1 + 2 ][ ?1 + 1 ] 
+            ifelse-value (prey-remaining >= ?2) [
+               ifelse-value (((prey-remaining mod 2) = 0) and (?2 = 1)) [ ?1 + 2 ][ ?1 + 1 ] 
             ][
              ?1 
             ]
           ]
         ]
       ]
-      final-distribution prey-remaining center-dist inv-center-dist g-center-dist
+      final-distribution g-center-dist inv-center-dist
     )
+  
+  DEBUG-MONITOR 2 final-distribution
   
   set zeroes map [? = 0] final-distribution
   set non-zero position false zeroes
   ifelse (non-zero != false) [
     ; Assume symmetry for speed-sake
-    set final-distribution sublist final-distribution non-zero (covered-patch-count - non-zero) 
+    set final-distribution sublist final-distribution non-zero (cell-count - non-zero) 
   ] [
     DEBUG-MONITOR 2 "Somebody asked us to distribute no prey (2)! Something might be wrong"
     set final-distribution [0]
   ] 
   
+  
+  let fcount sum final-distribution
   DEBUG-MONITOR 2 final-distribution
-  DEBUG-MONITOR 2 (WORD (sum final-distribution) "/" prey-count)
+  DEBUG-MONITOR 2 (WORD fcount "/" prey-count)
+  
+;  if ((sum fcount) != prey-count) [
+;    show (WORD "error on inputs: "  prey-count " " sd-patches " " areal-weights)
+;  ]
   report final-distribution
 
   
 end
 
 to-report distribute-discrete-easy [prey-count prey-variance]
-  report distribute-discrete prey-count prey-variance [1 1 1 1 1 1 1]
+  let sd-patches 1 + (round ((sqrt prey-variance) / kmpp))
+  let p-count (2 * (round (((5 * sd-patches) + 1) / 2))) - 1
+  let weights n-values p-count [1]
+  let distribution-cells segment-weighted-gaussian sd-patches weights
+  report distribute-discrete prey-count distribution-cells
 end
 
 ; quick little stress-test
@@ -632,4 +521,12 @@ to-report fold-distribution [distribution fold-point]
   let dfp (2 * fold-point)
   
   report sublist (map [ifelse-value ((?2 > fold-point) and (?2 <= dfp)) [?1 + (item (dfp - ?2) distribution)][?1]] distribution indices) fold-point dcount
+end
+
+to-report split-distribution [distribution]
+  let dcount length distribution
+  let ncount (2 * dcount) - 1
+  let mcount dcount - 1
+  let cdist n-values ncount [ abs (? - mcount) ]
+  report map [(item ? distribution) / (ifelse-value (? = 0)[1][2])] cdist
 end

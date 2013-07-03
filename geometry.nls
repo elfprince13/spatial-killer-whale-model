@@ -92,7 +92,7 @@ end
 ; TO do this, it updates the y-intercept where the line crosses columns.  Remember that a patch coordinate pxcor pycor indicate
 ; the center of the patch. So the boundary between a patch and its neighbor to the right (a "column") is at pxcor + 0.5
 to-report find-line [x1 y1 x2 y2]
-  DEBUG-MONITOR 2 (word "Call to reporter find-line for segment: (" x1 "," y1 ") (" x2 ","  y2 ").")
+  DEBUG-MONITOR 3 (word "Call to reporter find-line for segment: (" x1 "," y1 ") (" x2 ","  y2 ").")
 
    ; Determine if line moves left to right or right to left. If the line moves right to left (i.e. x1 > x2) then set reverse? = true
    ; and patches will be visited from (x2,y2) back to (x1,y1) but placed on the list in reverse order so that the reported list still goes form (x1,y2) to (x2,y2)
