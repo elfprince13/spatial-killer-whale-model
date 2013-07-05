@@ -8,14 +8,14 @@
 ; prey-data[i][NUM-CLASSES#] holds the number of age classes for prey type i.  This is always at least 2: AF and AM.  
 ;
 ; DATA STRUCTURES
-; num-seasons – A 1D structure: a list of the number of seasons for each prey type.
+; num-seasons -- A 1D structure: a list of the number of seasons for each prey type.
 ;
-; seasons-data – A 2D structure (list of lists).
-;            - Each list contains the starting days of each season, in increasing order, for the prey-type of the given number.  
+; seasons-data -- 2D structure (list of lists).
+;             - Each list contains the starting days of each season, in increasing order, for the prey-type of the given number.  
 ;             The value in num-seasons[i] should contain the length of seasons-data[i]. The value of seasons-data[i][j] is the starting day of season [j] for prey type i.
 ; NOTE: If the first season listed (season 0) begins with day > 0, then day 0 is part of the final season in the list.
 ;
-; distribution-counts – A 2D structure (list of lists)
+; distribution-counts -- A 2D structure (list of lists)
 ;            -  Each list corresponds to the number of prey locations for the given prey type for the given season. 
 ;            -  That is, distribution-counts[i][j] is the number of different locations for prey type i for season j.
 ;
@@ -195,17 +195,17 @@ to seasonal-distribution [prey-type day-of-year]
     ; list contains long lat age-class-percentages-for-all-age-classes p-coastal coastal-sd offshore-sd
     let long (item 0 this-loc)
     let lat (item 1 this-loc)
+    show this-loc
     let central-patch long-lat-patch long lat
     let len (length this-loc)
     let p-coastal (item (len - 3) this-loc)
     let coastal-sd (item (len - 2) this-loc)
     let offshore-sd (item (len - 1) this-loc)
           
-    let seed find-a-shore central-patch
-    
     ;;;;;;;;;;;;;;;;;
     ;; Talk to Ward about whether or not this is a reasonable thing to do!
     ;; (or whether data should be tweaked)
+    let seed find-a-shore central-patch
     ;if [not water?] of central-patch [
       set central-patch item 0 seed
     ;]
@@ -325,6 +325,9 @@ to distribute-prey-about-patch [prey-type class-type prey-count central-patch pr
   let num-patch-types length probabilities
   let prey-remaining prey-count
   ; Can't nest reporter-tasks, so foreach is out :(
+  
+  show (WORD "Distributing prey about patch " central-patch)
+  
   repeat num-patch-types [
     
     let pc ifelse-value ((1 + patch-type-counter) < num-patch-types)[ round (prey-count * (item patch-type-counter probabilities)) ][ prey-remaining]
@@ -336,33 +339,61 @@ to distribute-prey-about-patch [prey-type class-type prey-count central-patch pr
       set cur-distribution (distribute-discrete pc cur-distribution) 
       set cur-distribution fold-distribution cur-distribution (floor ((length cur-distribution) / 2))
       set cur-patchsets sublist cur-patchsets 0 length cur-distribution
+      
+      let dist-buffer []
+      let p-buffer []
             
       (foreach cur-distribution cur-patchsets [
         let near-patches count ?2
+        if (?1 < 0) [ print (WORD "A negative value of " ?1 " appeared")]
         ifelse (near-patches > 0) [
-          let per-patch (floor (?1 / near-patches))
-          let patch-remainder (?1 mod near-patches)
-          if (per-patch > 0) [
-            ask ?2 [
-              add-to-prey-class-count prey-type class-type per-patch
-              ;set odistd (odistd + per-patch)
-            ]
-          ]
-          ask n-of patch-remainder ?2 [
-              add-to-prey-class-count prey-type class-type 1
-              ;set odistd (odistd + 1)
-          ]
+          set p-buffer lput ?2 p-buffer
+          distribute-n-over-m-patches prey-type class-type ?1 ?2
         ][
-          if (?1 > 0) [ show (WORD "No patches at distance for patchset " ?2 " (missing " ?1 " prey )") ]
-          ;set odistm (odistm + ?1)
+          if (?1 > 0)[ set dist-buffer lput ?1 dist-buffer]
+          print (WORD "no patches at distance for patchset " ?2 " (missing " ?1 " prey)")
         ]
       ])
+      
+      ; Correct for instances where we got an empty patchset where there were supposed to be patches!
+      ; This happens when a cell is weighted for 0 (because none exist at the radius)
+      ; But the rounding error correction determines it is still needed! 
+      
+      show dist-buffer
+      show p-buffer
+      let ap-count length p-buffer
+      let db-count length dist-buffer
+      ifelse (ap-count > 0 and db-count > 0)[
+        set p-buffer n-values (db-count) [(item (? mod ap-count) p-buffer)]
+        show p-buffer
+      
+        (foreach dist-buffer p-buffer [
+          distribute-n-over-m-patches prey-type class-type ?1 ?2
+        ])
+      ][
+        ifelse (db-count > 0) [ print " O_o no patches were ever found!"]
+        [ print "no corrections necessary" ]
+      ]
       
     ]
     
     set patch-type-counter 1 + patch-type-counter
   ]
   
+end
+
+to distribute-n-over-m-patches [prey-type class-type n m-patches]
+  let near-patches count m-patches
+  let per-patch (floor (n / near-patches))
+  let patch-remainder (n mod near-patches)
+  if (per-patch > 0) [
+    ask m-patches [
+      add-to-prey-class-count prey-type class-type per-patch
+    ]
+  ]
+  ask n-of patch-remainder m-patches [
+    add-to-prey-class-count prey-type class-type 1
+  ]
 end
 
 to-report segment-weighted-gaussian [sd-patches areal-weights]

@@ -11,7 +11,7 @@
 
 ; This file (whale.nlogo) includes model controls plus whale behavior.
 
-__includes ["map.nls" "prey.nls" "constants.nls" "distribution.nls" "geometry.nls"]
+__includes ["map.nls" "prey.nls" "constants.nls" "distribution.nls" "geometry.nls" "memory.nls"]
 ; ------- ADDITIONAL FILES ----------
 ;     map.nls includes procedures and declarations for spatial information.
 ;     constants.nls includes declaration and initialization of constants, primarily related to whale physiology and movement
@@ -45,6 +45,8 @@ whales-own [
   
   destination                     ; a whale's current destination, given as a patch.   
   current-path                    ; If the whale is in travel mode (long distance) then this contains a list of patches giving a path to the whale's destination.
+  
+  memory
 ]
 
 globals [
@@ -1081,10 +1083,10 @@ whales-starved\n
 SLIDER
 1
 294
-173
+218
 327
-days-per-period
-days-per-period
+days-per-hunting-season
+days-per-hunting-season
 10
 100
 98
