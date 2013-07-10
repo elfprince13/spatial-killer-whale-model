@@ -594,7 +594,7 @@ to travel
    ]
    ; If no path exists, compute a path from the current patch to the destination.
    if current-path = nobody [
-     set current-path path-from-patch-to-patch patch-here destination
+     set current-path sparse-path-to-patch destination
      RUN-MONITOR 2 (word " found the following path: " current-path)
    ]
    toward-destination
