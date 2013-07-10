@@ -180,8 +180,78 @@ end
 
 ; report the encounter-rate (percentage of prey of the given type that will be encountered by whales) 
 ; prey-type is an index holding  one of harbor-seals#, harbor-seals0#, dall-porpoises#, etc. 
-to-report encounter-rate [ prey-type ]
-   report (item ENCOUNTER-RATE# (item prey-type hunting-data))
+to-report encounter-rate [ prey-type class-type ]
+   report (item ENCOUNTER-RATE# (item class-type (item prey-type hunting-data)))
+end
+
+to-report spatial-encounter-rate [ season class-type prey-type the-patch ]
+  ; The encounter rate as used in formulas must have the following units (where er is the encounter rate):
+  ;
+  ; er ∝ (1 / hunting-groups) (1 / days)
+  ; 
+  ; Which is to say,
+  ; (#Prey Encountered by n Hunting Groups on m Days) = n * m * (prey-total) * er 
+  ;
+  ; Moreover, we assume the following functional dependencies based on straightforward
+  ; application of the previous unit analysis and an understanding of encounters between orca
+  ; and prey as being roughly analogous to collisions between particles in a kinetic model of
+  ; gas behavior (and thus the encounter-rate as being proportional to a mean-free-path of sorts,
+  ; and, thus density dependent)
+  ; 
+  ; (where <expression> denotes the expected/mean value of that expression):
+  ;
+  ; er ∝ (area-hunted / prey-total) * <prey-present / area-hunted>
+  ; 
+  ; Keep in mind that the encounter rate as given in our source data is a parameter to a nonspatial model
+  ; Thus the areas in the above analysis are represent purely conceptual entities and exist only as
+  ; side-effects of parameterizing a density-dependent quantity (er). However our model is a spatial model
+  ; and we must be able to vary the encounter-rate to correlate with real densities.
+  ; The naive way to go about this is to multiply the existing encounter-rate by the number of prey in a particular
+  ; patch, rather than by the global population count. The trouble with such an approach is that the area-hunted
+  ; term for our non-spatial model is not necessarily inclusive of all prey-containing patches. After all,
+  ; whales will prefer to hunt in areas with denser populations.
+  ;
+  ; To correct for this discrepancy, we define the following transformation:
+  ;
+  ; f(er,x,y) : er_ns -> er_s =  (area-hunted_s / area-hunted_ns) * (prey-density(x,y) / <prey-present / area-hunted_ns>) * er
+  ; 
+  ; Note that the unit analysis remains the same! With both parenthesized expressions, we're multiplying by a pure number
+  ; - in the first case a ratio of areas, and in the second case, a ratio of densities.
+  ;
+  ; Applying this transformation requires us to estimate values for area-hunted_ns and <prey-present / area-hunted_ns>
+  ; To do so, we make the following assumptions:
+  ; - Whales primarily hunt in dense regions. Thus the area-hunted_ns and <prey-present / area-hunted_ns> terms are biased towards 
+  ; those regions.
+  ; - The "dense" regions will be defined as those regions within 1 standard deviation of the center of the deviation.
+  ; - Our spatial model uses distributions which have Gaussian density. These must be explicitly calculated to deal with 
+  ; a variable shoreline and island placement, as well as discretization effects. However for our estimation of <prey-present / area-hunted_ns>, 
+  ; we will idealize these regions as circles. The distribution with a pdf(u) = |u| e^-((u^2)/2)  (where u = (x / sigma)) is normalized, 
+  ; yields a circle with normal density at radius u (the density at any point on the circle is obviously pdf(u) / (2π), as it must be swept around).
+  ;
+  ; Thus area-hunted_ns = π * Sum(sigma_i ^ 2, i = 1 .. # prey sites), which in practice thus far can be reduced to simple multiplication
+  ; as the sigma for each prey type and season is constant in our data files.
+  ;
+  ; < prey-present / area-hunted_ns> is then
+  ;
+  ; area-hunted_s is trivially kmpp * kmpp
+  ;
+  let nonspatial-encounter-rate encounter-rate prey-type class-type
+  
+  ; First correct the encounter-rate by dividing out < prey / area-hunted_ns >
+  ; Then divide by area-hunted_ns and multiply by area-hunted_s,
+  ; and finally multiply by the number of prey in this patch
+  
+  let area-hunted_spatial 0.6 * 0.6
+  
+  ; distributions -- A 4D structure (list of lists of lists of lists) 
+  ;              - distributions[i][j][k] corresponds to the kth location for season j for prey type i. 
+  ;              - each location is a list of length c + 5 where c is the number of age classes
+  ;                  the list contains long lat age-class-percentages p-coastal coastal-sd offshore-sd 
+  ;              - distributions-counts[i][j] gives the length of list distributions[i][j][k].  
+  
+  let num-locs length (item season (item prey-type distributions))
+  
+  report 0
 end
 
 ; report the disbursement-rate for a given prey type (number of patches that have any of that prey) 
@@ -199,7 +269,7 @@ to-report expected-prey-encounters [prey-type class-num effective-group-size]
 
     ; Encounter rate is weighted for a global number of seals and for 24 hours. Need to scale up because we have only 1 patch
     ; ** NOTE WE MAY NEED LATER TO SCALE AGAIN BASED ON TIME STEP, OR TO CHANGE DISBURSEMENT SCALE FACTOR
-    let avg-prey-encountered (encounter-rate prey-type) * prey-count-here * (2 * disbursement-rate prey-type) 
+    let avg-prey-encountered (encounter-rate prey-type class-num) * prey-count-here * (2 * disbursement-rate prey-type) 
     
     ; Now turn the expected number of prey encountered into an expected number killed based on vulnerability to a group this size
     let vuln (vulnerability prey-type effective-group-size)  ; get the vulernability of this prey-type
