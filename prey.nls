@@ -184,7 +184,7 @@ to-report encounter-rate [ prey-type class-type ]
    report (item ENCOUNTER-RATE# (item class-type (item prey-type hunting-data)))
 end
 
-to-report spatial-encounter-rate [ season class-type prey-type the-patch ]
+to-report spatial-encounter-rate [ class-type prey-type ]
   ; The encounter rate as used in formulas must have the following units (where er is the encounter rate):
   ;
   ; er ∝ (1 / hunting-groups) (1 / days)
@@ -231,34 +231,34 @@ to-report spatial-encounter-rate [ season class-type prey-type the-patch ]
   ; Thus area-hunted_ns = π * Sum(sigma_i ^ 2, i = 1 .. # prey sites), which in practice thus far can be reduced to simple multiplication
   ; as the sigma for each prey type and season is constant in our data files.
   ;
-  ; < prey-present / area-hunted_ns> is then
+  ; < prey-present / area-hunted_ns> is then approximated as
+  ; < prey-present / area-hunted_ns> = Integral( pdf(u), u = 0..1) * prey-total / area-hunted_ns = (1 - 1/sqrt(e)) * prey-total / area-hunted_ns
   ;
-  ; area-hunted_s is trivially kmpp * kmpp
+  ; area-hunted_s is trivially kmpp * kmpp, but prey-density(x,y) will always be an integer / (kmpp * kmpp), 
+  ; so those can trivially both be made unitless, and area-hunted_s set = 1.
   ;
+  ; Then the final form for f(er,x,y) = (area-hunted_s / area-hunted_ns) * (prey-density(x,y) / ((1 - 1/sqrt(e)) * prey-total / area-hunted_ns)) * er
+  ;                                   = er * prey-density(x,y) * (1 patch area) / ((1 - 1/sqrt(e)) * prey-total)
+  ;
+  ; However, keep in mind that this value must still be multiplied by prey-total to be consistent with the original formula.
+  ; Also keep in mind that the units of time for the original non-spatial simulation are in days rather than hours.
+  ; For convenience we will alter our final calculated value in the following manner:
+  ;   Absorbing the factor of prey-total cancels out a calculation, and factoring out prey-density(x,y) allows
+  ;   the result of this function to be reused for all matching values of class-type and prey-type 
+  ;   (and improves modularity by reducing the arguments that must be passed around).
+  ;   Finally, we convert the (1 / days) dependence to (1 / hours) by straightforward division by 24
+  ;
+  ; We'll call this new function fbar:
+  ; fbar(er) = er / (24 * (1 - 1/sqrt(e))) = er / (24 * 0.39346934) = er * 0.1058955867723666
   let nonspatial-encounter-rate encounter-rate prey-type class-type
-  
-  ; First correct the encounter-rate by dividing out < prey / area-hunted_ns >
-  ; Then divide by area-hunted_ns and multiply by area-hunted_s,
-  ; and finally multiply by the number of prey in this patch
-  
-  let area-hunted_spatial 0.6 * 0.6
-  
-  ; distributions -- A 4D structure (list of lists of lists of lists) 
-  ;              - distributions[i][j][k] corresponds to the kth location for season j for prey type i. 
-  ;              - each location is a list of length c + 5 where c is the number of age classes
-  ;                  the list contains long lat age-class-percentages p-coastal coastal-sd offshore-sd 
-  ;              - distributions-counts[i][j] gives the length of list distributions[i][j][k].  
-  
-  let num-locs length (item season (item prey-type distributions))
-  
-  report 0
+  report nonspatial-encounter-rate * 0.1058955867723666
 end
 
 ; report the disbursement-rate for a given prey type (number of patches that have any of that prey) 
 ; prey-type is an index holding  one of harbor-seals#, harbor-seals0#, dall-porpoises#, etc. 
 to-report disbursement-rate [ prey-type ]
    report item prey-type disbursement
-end
+end  
 
 ; CONTEXT:  ONE PATCH
 ; Report the expected number of successful prey encounters (prey encountered and successfully hunted) for one prey of the given type and a group of the given size
@@ -269,7 +269,7 @@ to-report expected-prey-encounters [prey-type class-num effective-group-size]
 
     ; Encounter rate is weighted for a global number of seals and for 24 hours. Need to scale up because we have only 1 patch
     ; ** NOTE WE MAY NEED LATER TO SCALE AGAIN BASED ON TIME STEP, OR TO CHANGE DISBURSEMENT SCALE FACTOR
-    let avg-prey-encountered (encounter-rate prey-type class-num) * prey-count-here * (2 * disbursement-rate prey-type) 
+    let avg-prey-encountered (spatial-encounter-rate prey-type class-num) * prey-count-here 
     
     ; Now turn the expected number of prey encountered into an expected number killed based on vulnerability to a group this size
     let vuln (vulnerability prey-type effective-group-size)  ; get the vulernability of this prey-type

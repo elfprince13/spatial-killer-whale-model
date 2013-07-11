@@ -304,7 +304,7 @@ to-report water-patches-within-to-list [dists filters]
   let all-patches (water-patches-within (max dists))
   ask all-patches [set visited? round visited?]
   let patch-subsets map [all-patches with [(runresult ? self)]] filters
-  report (list all-patches (map subset-at-dist patch-subsets dists))
+  report (list all-patches patch-subsets (map subset-at-dist patch-subsets dists))
 end 
 
 to-report count-listed-patchset [l]
