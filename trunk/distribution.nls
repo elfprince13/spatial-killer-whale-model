@@ -202,21 +202,21 @@ to seasonal-distribution [prey-type day-of-year]
     let coastal-sd (item (len - 2) this-loc)
     let offshore-sd (item (len - 1) this-loc)
           
-    ;;;;;;;;;;;;;;;;;
-    ;; Talk to Ward about whether or not this is a reasonable thing to do!
-    ;; (or whether data should be tweaked)
-    let seed find-a-shore central-patch
-    ;if [not water?] of central-patch [
-      set central-patch item 0 seed
-    ;]
-    ;;;;;;;;;;;;;;;;;
+;    ;;;;;;;;;;;;;;;;;
+;    ;; Talk to Ward about whether or not this is a reasonable thing to do!
+;    ;; (or whether data should be tweaked)
+;    let seed find-a-shore central-patch
+;    ;if [not water?] of central-patch [
+;      set central-patch item 0 seed
+;    ;]
+;    ;;;;;;;;;;;;;;;;;
     
     
     let patch-sd-list (list (coastal-sd / kmpp) (offshore-sd / kmpp))
     let p-list (list p-coastal (1 - p-coastal))
     
     let prey-patches [water-patches-within-to-list (map [round (? * 2.5)] patch-sd-list) coastal-filters] of central-patch
-    let listed-prey-patches (item 1 prey-patches)
+    let listed-prey-patches (item 2 prey-patches)
     set prey-patches (item 0 prey-patches)
     let loc-distributions (map [segment-weighted-gaussian (round ?1) (split-distribution count-listed-patchset ?2)] patch-sd-list listed-prey-patches)
     

@@ -42,6 +42,19 @@ to initialize-random-whale-memories [ num-regions ]
        ;;
        ;; compute kg that this whale would consume if it hunted with the expected prey-counts
        ;; add a 1-hour record for the given season, hunting-region, and estimated kg-consumed
+       
+       
+       ;;;;;;;;;;;;;;;;;;;;;;;;
+       ;
+       ; We'll do this an easy way! 
+       ; Assume that, on average, sites for distribution fall within a single hunting region
+       ; So....just add up the number of sites contained by that region!
+       ; The trick is doing that part efficiently.
+       ; One thought is to build a table before hand
+       ; Which would have to be of length = count nodes with [anchor?]
+       ; 
+       ;
+       ;;;;;;;;;;;;;;;;;;;;;;;;
      ]
      set season-number (season-number + 1) 
   ]
