@@ -312,6 +312,17 @@ to-report current-mass [prey-type]
   let end-wt (item END-MASS# (item prey-type hunting-data))
   report start-wt + ratio * (end-wt - start-wt)
 end
+
+; This is actually the same mapping as provided by get-season-from-day in
+; distribution.nls, we should profile and figure out which one is faster.
+; This functional style is "cleaner", but not sure how smart the NetLogo compiler is
+to-report current-prey-season [prey-type day]
+  let seasons (item prey-type seasons-data)
+  let day1 (item 0 seasons)
+  let dm (day - day1) mod 365
+  let candidates (map [dm >= (? - day1)] seasons)
+  report (length seasons) - (position true reverse candidates) - 1
+end
   
 ; ---------------------PREY DYNAMICS  --------------
 to update-prey
