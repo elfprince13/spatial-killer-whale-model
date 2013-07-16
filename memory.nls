@@ -29,6 +29,86 @@ to reset-memory-of-all-whales
   ask whales [set memory empty-memory]
 end
 
+to-report init-nlist [n init ct-classes]
+  let classlist n-values ct-classes init
+  report n-values n [classlist]
+end
+
+to-report list-of-inited-nlists-from-list [inlist n init ct-classes]
+  let nlist init-nlist n init ct-classes
+  report map [nlist] inlist
+end
+
+to-report initialize-prey-estimation-cache [num-regions]
+  let indices n-values (length seasons-data) [?]
+  report (map [list-of-inited-nlists-from-list ?1 num-regions (task -1) (item NUM-CLASSES# ?2)] seasons-data prey-data)
+end
+
+to-report request-classlist-estimate [prey-type class-num this-loc]
+  let prey-list (item prey-type hunting-data)                       ; Extract from hunting data the list of data for this prey type
+  let class-list (item class-num prey-list)                                 ; Extract from list of data for this prey type the list of data for this age class
+  let members (item GLOBAL-POP# class-list)                         ; Get the number of prey of this age class in the total population
+  let prop-here (item (class-num + 2) this-loc)                      ; Proportion of total population to distribute around this area for this age class
+  let num-here round (prop-here * members)                           ; Total number to go here based on percental of total population of this age class
+  let i-num-here ifelse-value((members - num-here) < 0) [members][num-here]                                      ; compute the integer version.
+        
+  report i-num-here
+end
+
+to-report request-prey-estimate [cache prey-type day hunting-region-no]
+  let season-index current-prey-season prey-type day
+  print (WORD "Season: " season-index)
+  let pcachegrid item prey-type cache
+  let scacheline item season-index pcachegrid
+  show (WORD "moo " scacheline)
+  let prey-estimate item hunting-region-no scacheline
+  let ct-classes (item NUM-CLASSES# (item prey-type prey-data))               ; The number of age classes for this prey type
+  
+
+  if (prey-estimate = (n-values ct-classes [-1]) )[
+    let ct-locations (item season-index (item prey-type distribution-counts))   ; The number of locations for distribution for this prey type an this season
+    
+    set scacheline init-nlist (length scacheline) (task 0) ct-classes
+    show (WORD "boo " scacheline)
+    let loc 0
+    repeat ct-locations[
+      let this-loc (item loc (item season-index (item prey-type distributions)))   ; distributions[i][j][k] is the kth location for season j for prey type i
+      ; list contains long lat age-class-percentages-for-all-age-classes p-coastal coastal-sd offshore-sd
+      let long (item 0 this-loc)
+      let lat (item 1 this-loc)
+      ;show this-loc
+      let central-patch long-lat-patch long lat
+      let len (length this-loc)
+      let p-coastal (item (len - 3) this-loc)
+      let coastal-sd (item (len - 2) this-loc)
+      let offshore-sd (item (len - 1) this-loc)
+          
+    ;;;;;;;;;;;;;;;;;
+    ;; Talk to Ward about whether or not this is a reasonable thing to do!
+    ;; (or whether data should be tweaked)
+    let seed find-a-shore central-patch
+    if [not water?] of central-patch [
+      set central-patch item 0 seed
+    ]
+    ;;;;;;;;;;;;;;;;;
+      
+      let cvals n-values ct-classes [request-classlist-estimate prey-type ? this-loc]
+      
+      
+      let target-region [hunting-region] of central-patch
+      set scacheline replace-item target-region scacheline (map [?1 + ?2] cvals (item target-region scacheline))
+      
+      
+      set loc 1 + loc
+    ]
+    set pcachegrid replace-item season-index pcachegrid scacheline
+    set cache replace-item prey-type cache pcachegrid
+    
+    set prey-estimate (item hunting-region-no scacheline)
+    
+  ]
+  report (list prey-estimate cache)
+end
 ; For each hunting season, give each whale a memory of hunting in a certain number of regions .
 to initialize-random-whale-memories [ num-regions ]
   let season-number 0
