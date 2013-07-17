@@ -46,13 +46,13 @@ whales-own [
   destination                     ; a whale's current destination, given as a patch.   
   current-path                    ; If the whale is in travel mode (long distance) then this contains a list of patches giving a path to the whale's destination.
   
+  ; Data on whale's past hunting experiences.    See memory.nls for more complete description of the information and format.
   memory
 ]
 
 globals [
   ; General global variables used for the simulation
   hours days years   ; keeps track of the time
-  HpT                ; hours per tick -- determines the time scale
   
   leaders       ; a list of whales that are current group leaders (and decision makers)
     
@@ -107,7 +107,6 @@ to setup
   set hours 0
   set days 0
   set years 0
-  set HpT 1
   set successful-mating 0
   set whales-born 0
   set whales-died-at-birth 0
@@ -129,10 +128,22 @@ end
 
 ;; =========================================================================================================
 ; Initialization of the population of whales
-; In v 1.0, whales ages, genders, etc. are random, and there is one matrilineal line
+; In v 1.0, whales ages, genders, etc. are random, as are the matrilineal lines
+; This should be called only once during the initialization of the simulation.
 to init-whales
   SETUP-MONITOR 0 "Initializing whales..."
   init-whale-globals
+  whale-genesis
+  create-whale-hunting-groups
+  ; Select whale groups to track with pens, based on the tracking-mode chooser.
+  if tracking-mode = "all groups" [ask leaders [pen-down]]
+  if tracking-mode = "one group" [ask one-of leaders [pen-down]]
+end
+
+; Procedure to actually create the starting number of whales and initialize the whales-own variables for each.
+; None of the whales are pregnant or lactating, and all have a random age from 0 to 24. 
+; This should be called only once, by init-whales, during the initialization of the simulation.
+to whale-genesis
 
   ; initialize a random population of whales, 50% female, aged 2 to 24, with no pregnant or lactating females
   create-whales INITIAL-NUMBER-WHALES [
@@ -160,7 +171,13 @@ to init-whales
     set destination nobody
     set current-path nobody
   ]
-  
+end
+
+
+; Procedure to take the existing initial group of whales and divide them into (random) hunting groups with (random) matrilineal lines
+; and a group leader for each group.
+; This should be called only once, by init-whales, during the initialization of the simulation.
+to create-whale-hunting-groups
   ; Assign to whales a random older female as its mother. Every whale should have a mother-id except the oldest females, which are the matriarchs.
   let matriarch-age [age-years] of max-one-of whales with [female?] [age-years]  ; find age of the oldest female
   ask whales [                                                                   ; ask other whales to set their mother-id (unless too old to be offspring of matriach)
@@ -171,18 +188,16 @@ to init-whales
     ]
   ]
   
-  set leaders (turtle-set) 
   ; Pick group leaders. To create average group sizes of 3.5, we let 1/3.5 of the whales be leaders.  Leaders should be at least 10 years old.
   ; Leaders will be initialized at some random inland patch.  Other whales assigned to their group will join them.
   ask n-of (INITIAL-NUMBER-WHALES / 3.5) whales with [age-years >= 10] [
-    set is-leader? true                              ; identify this whale as a leader who will be making group decisions
-    set group (turtle-set self)                      ; put each leader in his own group
-    move-to one-of water with [shore-dist < 30 and shore-dist > -1]      ; move to a random patch which isn't "too far out"
+    set is-leader? true                                               ; identify this whale as a leader who will be making group decisions
+    set group (turtle-set self)                                       ; put each leader in her own group
+    move-to one-of water with [shore-dist < 30 and shore-dist > -1]   ; move to a random patch which isn't "too far out"
   ]
-  ask whales with [not is-leader?] [join-random-group]      ; put all whales in some group
-  balance-groups                                            ; there should be variance among group sizes, but don't allow groups of just 1 adult
-  set leaders whales with [is-leader?]              ; Create a list of group leaders for later efficiency
-  ; plot-masses
+  ask whales with [not is-leader?] [join-random-group]                ; put all whales in some group
+  balance-groups                                                      ; there should be variance among group sizes, but don't allow groups of just 1 adult
+  set leaders whales with [is-leader?]                                ; Create a list of group leaders for later efficiency
 end
 
 ; ----------------------------------------
@@ -218,11 +233,7 @@ end
 ; This is the basic logic procedure for a single time unit.
 to move
    tick
-   
-   ; Track whales only if track-whales switch is set to true 
-   ask whales [pen-up]              
-   if track-whales [ask leaders [pen-down]]
-   
+      
    move-whales                      ; Handles all whale behavior
    update-prey                      ; Updates all prey, including responses to nearby whales, seasonal migration, and population dynamics
    increment-clock
@@ -230,16 +241,16 @@ to move
 end
 
 ; CONTEXT: Observer
-; Update the global clocks. On tick = HpT hours, where HpT is a global representing hours-per-tick.  This assumes that HpT evenly divides 24.
+; Update the global clocks.  Each tick represents 1 hour == the temporal scale of this simulation.
 to increment-clock
-   set hours hours + HpT            ; Add a tick's worth of hours
+   set hours hours + 1             ; Add a tick's worth of hours
    if hours = 24 [                 ; If past 23 hours, start a new day.  (Hours are numbered 0..23)
      set hours 0
      set days days + 1
      ; plot-masses
    ]
-   if days >= 365 [                 ; If past 364 days, start a new year.  (Days are numbered 0..364. There are no leap years modeled.)              
-     set days days - 365
+   if days = 365 [                 ; If past 364 days, start a new year.  (Days are numbered 0..364. There are no leap years modeled.)              
+     set days 0
      set years years + 1
    ]
 end
@@ -277,7 +288,7 @@ to movement-decisions
 end
 
 ; CONTEXT: One whale
-; This should be called once per day
+; This should be called once per day - that is, whenever hours=0, or equivalently when ticks mod 24 = 0.
 ; Convert food consumed (kcals-consumed) into body-mass (kgs)
 ; ... But also decrease body-mass from cals consumed by metabolism
 ; Age each whale one day
@@ -353,6 +364,7 @@ to update-pregnancy
   ]
 end
 
+; Pregnancy of female whales is entirely probabilistic, and does not involve encounters with male whales
 to check-begin-conception
     ; Get probability of reproduction, from tables
     let pRepro (item age-years MX)
@@ -470,13 +482,14 @@ to hunt
   let all-prey (get-prey-list effective-group-size)           ; lists every individual prey catchable, by type
   share-the-food all-prey
   
-  ; PREY IN THE AREA ARE NOW WARNED ABOUT THE HUNTING FOR SOME SPECIFIED TIME
-  ask patch-here [set prey-hiding hiding-time]
+  ; PREY IN THE AREA ARE NOW "WARNED" ABOUT THE HUNTING FOR SOME SPECIFIED TIME
+  ask water in-radius hiding-radius [set prey-hiding hiding-time]
 end
 
 ; CONTEXT: One whale (should be a group leader)
-; Reports a list of all the prey in the patch that were encountered and potentially successfully hunted
-; The list has one entry for each individual, giving the prey type of that individual
+; Reports a list of all the prey in the patch that were encountered and potentially successfully hunted.  
+; Each item in the list represents an individual prey as a pair--that is, a length two list: (prey-type, class-type).
+; Again, the list has one entry for each individual, giving the prey type and class type of that individual
 ; ** This is a helper procedure for hunt
 to-report get-prey-list [effective-group-size]
   ; FOR EACH TYPE OF PREY -- Determine the number that can be caught and potentially eaten 
@@ -489,13 +502,13 @@ to-report get-prey-list [effective-group-size]
       ; The patch-here evaluates the following report to return an expected number of prey killed of the given type.
       let avg-prey-encountered (expected-prey-encounters prey-type class-type effective-group-size)    
       
-      ; use the expected number to compute a encountered around a normal distribution
+      ; use the expected number to compute actual # encountered around a normal distribution
       let num-can-catch random-normal avg-prey-encountered (avg-prey-encountered / 5)    
       let frac remainder num-can-catch 1                                    ; store the fractional part
       set num-can-catch int (num-can-catch)                                 ; get rid of fractional part
       if (random-float 1.0) < frac [set num-can-catch (num-can-catch + 1)]  ; add one back with probability frac
       
-      repeat num-can-catch [set result (lput prey-type result)]    ; Adds n individuals to the list of catchable prey where n=num-can-catch   
+      repeat num-can-catch [set result (lput (list prey-type class-type) result)]    ; Adds n individuals to the list of catchable prey where n=num-can-catch   
       set class-type (class-type + 1)
     ]
     set prey-type (prey-type + 1)
@@ -508,9 +521,10 @@ end
 
 
 ; CONTEXT: One whale (should be a group leader)
-; Is passed a list of prey that were potentially successfully hunted. These prey are shared among all members of 
-; the group, proportionally to their level of hunger. Each consumed prey lowers the population of that prey and 
-; provides food for whales.
+; Is passed a list of prey that were potentially successfully hunted. 
+; Each element in that list is a (prey-type, class-type) pair representing a single prey successfully hunted. 
+; These prey are shared among all members of the group, proportionally to their level of hunger. 
+; Each consumed prey lowers the population of that prey and provides food for whales.
 ; ** This is a helper procedure for hunt
 to share-the-food [all-prey]
   RUN-MONITOR 1 (word "is sharing a prey-list " all-prey)
@@ -523,16 +537,19 @@ to share-the-food [all-prey]
   ; Traverse through each item in the all-prey list of prey, and share around the group proportional to the hunger level of each member.
   ; Stop when no more whales desire food
   foreach all-prey [
-     let next-prey-type ?                             ; The current prey item from the list 
+     let next-prey-type (first ?)                      ; The prey-type of the current prey item from the list 
+     let next-class-type (last ?)                      ; The class-type of the current prey item from the list 
       
-     ; reflect that this prey was killed, and is no longer in the world
+     ; reflect that this prey was killed, and is no longer in the world by decrement the count on this patch of the number of prey of the given type and class
      ask patch-here [
-        let temp (item next-prey-type prey-counts)
-        set prey-counts (replace-item next-prey-type prey-counts (temp - 1))
+        let temp-list (item next-prey-type prey-counts)
+        let temp-item (item next-class-type temp-list)
+        set temp-list (replace-item next-class-type temp-list (temp-item - 1))
+        set prey-counts (replace-item next-prey-type prey-counts temp-list)
      ]
      
-     ; Share the food among the whales in the group, each whale getting an amoung proportional to its hunger 
-     let kg-killed current-mass next-prey-type 
+     ; Share the food among the whales in the group, each whale getting an amount proportional to its hunger 
+     let kg-killed (current-mass next-prey-type next-class-type)
      let kg-available kg-killed                     ; might be changed later to reflect not all calories get eaten
      
      ; Give each whale the smaller amount between what is available as their share and the amount they actually want
@@ -544,7 +561,7 @@ to share-the-food [all-prey]
         set desired-food (replace-item w desired-food (my-want - my-share))      ; decrease the amount this whale wants...
         let previously-eaten (item w eaten-food)
         set eaten-food (replace-item w eaten-food (previously-eaten + my-share))  ; and increase amount eaten
-        consume-food my-share (item KCAL-PER-GRAM# (item next-prey-type hunting-data)) PREY-TO-ENERGY-EFFICIENCY
+        consume-food my-share (item KCAL-PER-GRAM# (item next-class-type (item next-prey-type hunting-data))) PREY-TO-ENERGY-EFFICIENCY
         set w w + 1                                             ; go on to the next whale
      ]
      set total-desired (total-desired - kg-available)
@@ -1025,17 +1042,6 @@ NIL
 NIL
 1
 
-SWITCH
-2
-588
-128
-621
-track-whales
-track-whales
-0
-1
--1000
-
 MONITOR
 4
 146
@@ -1121,6 +1127,76 @@ map-mode
 map-mode
 "shore distance" "shore distance w/ graph" "prey density" "hunting regions" "hunting regions w/ graph" "voronoi" "voronoi w/ graph"
 0
+
+SLIDER
+0
+329
+177
+362
+evaluation-period
+evaluation-period
+1
+15
+5
+1
+1
+days
+HORIZONTAL
+
+SLIDER
+-2
+365
+236
+398
+max-time-without-rest
+max-time-without-rest
+5
+48
+24
+1
+1
+hours
+HORIZONTAL
+
+SLIDER
+0
+400
+178
+433
+rest-time
+rest-time
+1
+10
+4
+1
+1
+hours
+HORIZONTAL
+
+CHOOSER
+1
+581
+139
+626
+tracking-mode
+tracking-mode
+"no whales" "one group" "all groups"
+0
+
+SLIDER
+0
+435
+190
+468
+hiding-radius
+hiding-radius
+.5
+10
+5
+.5
+1
+patches
+HORIZONTAL
 
 @#$#@#$#@
 ## WHAT IS IT?
