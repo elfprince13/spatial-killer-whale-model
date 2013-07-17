@@ -16,15 +16,14 @@ globals [
   hunting-data             ; A 3D structure (list of lists)   
   prey-data                ; a 2D list holding the data specific to an entire species or distinct population
   num-prey-types           ; the number of lists in prey-data 
-  
-  disbursement
+
   best-hunting-grounds
+  
 ]
 
 patches-own [
   prey-counts        ; a list of lists of the numbers of the different types of prey, in the same order as the hunting-data list
                      ; prey-counts [i][j] contains the count of age-class j of prey-type i at this location.
-  sea-lions          ; a list of the number of stellar sea lions on this patch, ordered by the subpopulations
   prey-hiding        ; Number of time steps until prey come out of hiding. Set to 0 if prey on this patch are not aware of hunting KWs.
 ]
 
@@ -254,11 +253,15 @@ to-report spatial-encounter-rate [ class-type prey-type ]
   report nonspatial-encounter-rate * 0.1058955867723666
 end
 
-; report the disbursement-rate for a given prey type (number of patches that have any of that prey) 
-; prey-type is an index holding  one of harbor-seals#, harbor-seals0#, dall-porpoises#, etc. 
-to-report disbursement-rate [ prey-type ]
-   report item prey-type disbursement
-end  
+to-report expected-prey-encounters-by-area [patchcount prey-count prey-type class-num effective-group-size]
+  let avg-prey-encountered (spatial-encounter-rate prey-type class-num) * prey-count * (1 - hiding-effectiveness)
+  ; Now turn the expected number of prey encountered into an expected number killed based on vulnerability to a group this size
+  let vuln (vulnerability prey-type effective-group-size)  ; get the vulernability of this prey-type
+  let avg-catch-size (avg-prey-encountered * vuln)
+  
+  report avg-catch-size
+end
+
 
 ; CONTEXT:  ONE PATCH
 ; Report the expected number of successful prey encounters (prey encountered and successfully hunted) for one prey of the given type and a group of the given size
@@ -267,15 +270,7 @@ to-report expected-prey-encounters [prey-type class-num effective-group-size]
     
     let prey-count-here (item class-num (item prey-type prey-counts))         ; get the number of this prey-type present on this patch
 
-    ; Encounter rate is weighted for a global number of seals and for 24 hours. Need to scale up because we have only 1 patch
-    ; ** NOTE WE MAY NEED LATER TO SCALE AGAIN BASED ON TIME STEP, OR TO CHANGE DISBURSEMENT SCALE FACTOR
-    let avg-prey-encountered (spatial-encounter-rate prey-type class-num) * prey-count-here 
-    
-    ; Now turn the expected number of prey encountered into an expected number killed based on vulnerability to a group this size
-    let vuln (vulnerability prey-type effective-group-size)  ; get the vulernability of this prey-type
-    let avg-catch-size (avg-prey-encountered * vuln)
-    
-    report avg-catch-size
+    report expected-prey-encounters-by-area 1 prey-count-here prey-type class-num effective-group-size
 end
 
 ; patch reporter
@@ -300,6 +295,7 @@ to-report food-rating [effective-group-size]
 
    report avail-qty 
 end
+
 
 ; Reports the current expected mass of the prey of the given prey-type based on the day number.
 ; This is a linear scale from START-MASS to END-MASS over the length of one year from birth-date.
