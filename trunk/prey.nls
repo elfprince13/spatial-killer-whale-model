@@ -303,13 +303,12 @@ end
 
 ; Reports the current expected mass of the prey of the given prey-type based on the day number.
 ; This is a linear scale from START-MASS to END-MASS over the length of one year from birth-date.
-to-report current-mass [prey-type]
-  let birthday (item BIRTHING-DATE# (item prey-type hunting-data))   ; date in which this prey jumped an age class
-  let extra-days (days - birthday)                                ; how many days into the age class is this prey?
-  if extra-days < 0 [set extra-days (extra-days + 365)]
+to-report current-mass [prey-type class-num]
+  let birthday (item BIRTHING-DATE# (item class-num (item prey-type hunting-data)))   ; date in which this prey jumped an age class
+  let extra-days (days - birthday) mod 365                        ; how many days into the age class is this prey?
   let ratio (extra-days / 365)                                    ; linear scale from start weight to end weight
-  let start-wt (item START-MASS# (item prey-type hunting-data))
-  let end-wt (item END-MASS# (item prey-type hunting-data))
+  let start-wt (item START-MASS# (item class-num (item prey-type hunting-data)))
+  let end-wt (item END-MASS# (item class-num (item prey-type hunting-data)))
   report start-wt + ratio * (end-wt - start-wt)
 end
 
