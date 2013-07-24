@@ -32,11 +32,9 @@ globals [
   
   ; SOME NEW GLABOBALS RELATING TO SPATIAL MODELING AND THE HOURLY TIME FRAME
   ; distance globals given in kms
-  hunt-radius           ; whales will sense prey within this radius; given in kms
   hiding-time           ; prey, when warned of KWs, will hide for this many ticks
   hiding-effectiveness  ; the percentage of prey that will not be considered in encounter rates when prey are hiding.
   
-  tired-threshold        ; if whales have not rested for this many hours, they will be tired 
   whale-speed            ; in km/h
   travel-depth           ; max distance from the nearest shore that whales will attempt to stay at when in travel mode
    
@@ -122,9 +120,7 @@ to init-whale-globals
   
   ; Init constants relating to whale behavior and the current spatial and temporal time frame.
   ; These are new constants, not inherited from the non-spatial model. Comments on meaning above.
-  set tired-threshold 15    
   set whale-speed 8
-  set hunt-radius 2 
   set hiding-time 6
   set hiding-effectiveness 0.8         
   set travel-depth 15
