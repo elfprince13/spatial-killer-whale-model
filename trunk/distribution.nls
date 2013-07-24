@@ -31,7 +31,7 @@ globals [num-seasons
     seasons-data 
     distribution-counts 
     distributions    ; See descriptions above
-  average-seasonal-area
+    average-seasonal-area
 ]
 
 patches-own [test-value]
@@ -169,7 +169,7 @@ end
 
 ; --------------------------------------------------------------------------------------
 ; Reset to 0 the counts of all age classes of the given prey-type in all patches.
-; Store in the GLOBAL-POP# field of hunting-data the total number of prey found of all age classes of the given type. 
+; Add to the GLOBAL-POP# field of hunting-data the total number of prey found of all age classes of the given type. 
 to gather-and-count [prey-type]
   
 end
