@@ -123,10 +123,13 @@ to-report request-prey-estimate [cache prey-type day hunting-region-no effective
   ]
   report (list prey-estimate cache)
 end
-; For each hunting season, give each whale a memory of hunting in a certain number of regions .
+
+; RECOMMENT
+; NUM-REGIONS is the average number of regions a whale should have in its memory for each season.
 to initialize-random-whale-memories [ num-regions ]
+  let num-hunting-regions (count nodes with [anchor?])
   let season-number 0
-  let prey-estimation-cache initialize-prey-estimation-cache num-regions
+  let prey-estimation-cache initialize-prey-estimation-cache num-hunting-regions
   let leaders-list sort leaders
   let leaders-ct count leaders
   let half-off floor (leaders-ct / 2)
@@ -135,7 +138,7 @@ to initialize-random-whale-memories [ num-regions ]
   
   repeat number-hunting-seasons [
      let region-no 0
-     repeat num-regions [
+     repeat num-hunting-regions [
        let d random-day-in-season season-number
        let prey-type 0
        repeat num-prey-types [
