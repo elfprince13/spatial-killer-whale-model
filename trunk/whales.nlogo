@@ -21,28 +21,33 @@ __includes ["map.nls" "prey.nls" "constants.nls" "distribution.nls" "geometry.nl
 breed [whales whale]
 
 whales-own [
+  ; AGE OF WHALE.  Used to compute hunting efficiency, expected mass, reproductive success, etc.
+  age-years   
+  age-days
+
+  ; GENERIC INSTANCE VARIABLES RELATED TO PHYSIOLOGY
+  is-nursing?                      ; boolean for a young whale that is still dependent on the milk of its mother
+  body-mass                        ; current mass of the whale. can be compared with expected mass for a whale of this age.
+  gut-fill                         ; kgs consumed but not yet digested. whales can only eat a certain amount, and then must digest.
+  kcals-consumed                   ; energy intake durrent the current feeding cycle
+  milk-kgs-produced                ; used to compute cost of lactation for females
+  
+  ; INSTANCE VARIABLES FOR FEMALE WHALES, RELATED TO PREGNANCY AND LACTATION
+  days-to-birth                    ; for pregnant whales, how many days until birth of whale
+  pregnancy-cost                   ; metabolic cost of being pregnant
+  conception-day                   ; day that a female concieved. 
   female? pregnant? lactating?     ; boolean variables for female whales
-  is-nursing?
+  had-male-child?
+
+  ; INSTANCE VARIABLES SOCIAL DYNAMICS
   mother-id                        ; unique ID of this whale's mother, used for matrilineal lines
-  whales-met                       ; a list of whales with which this whale has associated
-  energy                           ; keeps track of food consumption vs. metabolism. Food intake increases energy. Every turn causes a decrease.
   is-leader?                       ; set to true if this whale is a group leader
   group                            ; a list of whales in this whale's current group -- only used if is-leader is true.
   leader                           ; the whale who leads this group -- only used if is-leader? is false.
-  body-mass
-  kcals-consumed
-  milk-kgs-produced
-  age-years
-  age-days
-  alive?                            ; boolean
-  days-to-birth
-  pregnancy-cost
-  conception-day
-  had-male-child?
-  gut-fill                        ; stores kgs consumed and undigested
-  ; body-condition
-  last-rest                       ; time steps since last rest
-  
+  ; whales-met                       ; *** FOR FUTRE *** a list of whales with which this whale has associated
+
+  ; INSTANCE VARIABLES USED FOR TRAVEL AND HOURLY DESCISION MAKING
+  last-rest                       ; If >0, this is the time steps since last rest. If <0, then the whale is currently resting and must rest for |last-rest| hours.
   destination                     ; a whale's current destination, given as a patch.   
   current-path                    ; If the whale is in travel mode (long distance) then this contains a list of patches giving a path to the whale's destination.
   
@@ -52,12 +57,10 @@ whales-own [
 
 globals [
   ; General global variables used for the simulation
-  hours days years   ; keeps track of the time
+  hours days years             ; keeps track of the current time.  one tick = one hour.
   
-  leaders       ; a list of whales that are current group leaders (and decision makers)
-  
-  max-active-ratio             ; The percentage of time a whale spends active if it goes the max time without rest, and then rests the minimum time
-    
+  leaders                      ; a list of whales that are current group leaders (and decision makers)
+      
   INITIAL-NUMBER-WHALES
   USE-DENSITY-DEPENDENCE?      ; if true, over-crowding effects are considered
   SCALE-REPRO-K-AGES-10-12?    ; if true, whale reproductivity is impacted for 10, 11, and 12-year old females
@@ -74,36 +77,22 @@ globals [
   whales-died-at-birth
   whales-starved
   other-deaths
-  
 ]
 
 ; ---------------------INITIALIZATION PROCEDURES--------------
 to setup
   ca
   
+  ; Set levels of reporting and user messages
   set SETUP-MONITOR-LEVEL 2
   set DEBUG-MONITOR-LEVEL 2
-  
-  ; Initialize the physical world
-  load-map                  ; Loads map data from an image, determine which patches are are land, coast, and water.
-  
-  ; set the distance from each water patch to the nearest coastal patch, and color water accordingly -- darker is farther from shore.
-  set-distance-in
-  
-  
-  compute-vd                ; Identify islands. For each water patch, compute the nearest land patch -- this implicitly gives the Voronoi diagram.
-  make-graph                ; Create a graph of nodes (including special anchor nodes) to be used for long distance whale movement
-  all-anchors-SSSP          ; Compute the shortest path from all graph nodes to all anchor nodes, and store the shortest-path info in the nodes. 
-  
+  set RUN-MONITOR-LEVEL 2     ; 1 = minimal file output   2 = file output of hunting events and daily decisions    3 = file output of detailed decisions
+
   ; Some globals that determine how the simulation is run
   set INITIAL-NUMBER-WHALES 180
   set USE-DENSITY-DEPENDENCE? true
   set SCALE-REPRO-K-AGES-10-12? true
   set MIN-HUNTING-K  1.5
-
-  ; Load data from data files for the prey and the whales
-  init-prey  
-  init-whales
     
   ; Initialize statistics variables
   set hours 0
@@ -114,15 +103,21 @@ to setup
   set whales-died-at-birth 0
   set whales-starved 0
   set other-deaths 0
-  
-  ; ratio of non-travel time spent hunting and traveling, vs. resting.
-  set max-active-ratio (max-time-without-rest / (rest-time + max-time-without-rest))
-  
-  set RUN-MONITOR-LEVEL 2     ; 1 = minimal screen output   2 = file output of hunting events and daily decisions    3 = file output of detailed decisions
     
+  ; Initialize the physical world and the underlying geographic data structures 
+  load-map                  ; Get map data (which patches are are land, coast, and water) from an image and associated text file.
+  set-distance-in           ; For each water patch, find out how far it is from the coast, or from open water.
+  compute-vd                ; Identify islands. For each water patch, compute the nearest land patch -- this implicitly gives the Voronoi diagram.
+  make-graph                ; Create a graph of nodes (including special anchor nodes) to be used for long distance whale movement
+  all-anchors-SSSP          ; Compute the shortest path from all graph nodes to all anchor nodes, and store the shortest-path info in the nodes. 
+
+  ; Load data from data files for the prey and the whales
+  init-prey  
+  init-whales
+   
   let file-name (word "Testrun-" (substring date-and-time 16 27) "-" (substring date-and-time 0 8))
   file-open file-name
-  file-print (word "Whale test run on " date-and-time " with " INITIAL-NUMBER-WHALES " whales.") 
+  RUN-MONITOR 0 (word "Whale test run on " date-and-time " with " INITIAL-NUMBER-WHALES " whales.") 
 
   reset-ticks
 end
@@ -137,9 +132,11 @@ end
 ; This should be called only once during the initialization of the simulation.
 to init-whales
   SETUP-MONITOR 0 "Initializing whales..."
-  init-whale-globals
-  whale-genesis
-  create-whale-hunting-groups
+  init-whale-globals                               ; Global constants having to do with whales                
+  whale-genesis                                    ; Create all the initial whales at start of simulation
+  create-whale-hunting-groups                      ; Create whale groups with leaders and matrilineal lines
+  initialize-random-whale-memories [ 5 ]           ; Give leaders of each group an initial artificial memory of past hunting
+  
   ; Select whale groups to track with pens, based on the tracking-mode chooser.
   if tracking-mode = "all groups" [ask leaders [pen-down]]
   if tracking-mode = "one group" [ask one-of leaders [pen-down]]
@@ -152,7 +149,7 @@ to whale-genesis
 
   ; initialize a random population of whales, 50% female, aged 2 to 24, with no pregnant or lactating females
   create-whales INITIAL-NUMBER-WHALES [
-    set whales-met (list )
+    ; set whales-met (list )
     set group nobody
     set is-leader? false
     set size 8.0                ; the size is for visibility
@@ -186,10 +183,10 @@ to create-whale-hunting-groups
   ; Assign to whales a random older female as its mother. Every whale should have a mother-id except the oldest females, which are the matriarchs.
   let matriarch-age [age-years] of max-one-of whales with [female?] [age-years]  ; find age of the oldest female
   ask whales [                                                                   ; ask other whales to set their mother-id (unless too old to be offspring of matriach)
-    ifelse (age-years + 5) < matriarch-age [                     ; if more than 5 years younger than the matriarch, assign a random older female whale as mother
+    ifelse (age-years + 5) < matriarch-age [                           ; if more than 5 years younger than the matriarch, assign a random older female whale as mother
       set mother-id [who] of one-of other whales with [female? and age-years > 5 + [age-years] of myself]
     ][
-      set mother-id -1                                           ; Whales to old to be the offspring of the matriarch no longer have a living mother.
+      set mother-id -1                                                 ; Whales too old to be the offspring of the matriarch no longer have a living mother.
     ]
   ]
   
@@ -237,12 +234,14 @@ end
 ; CONTEXT: Observer
 ; This is the basic logic procedure for a single time unit.
 to move
-   tick
-      
+   tick      
    move-whales                      ; Handles all whale behavior
-   update-prey                      ; Updates all prey, including responses to nearby whales, seasonal migration, and population dynamics
+   update-prey                      ; Updates all prey hiding 
    increment-clock
-   if (hours = 0) [ask whales [daily-step]]        ; Daily metabolism
+   if (hours = 0) [
+     ask whales [daily-step]        ; Daily metabolism -- whales digest food, thus emptying their gut.
+     ; NEW PROCEDURE.  CHECKS IF THIS IS THE FIRST DAY OF A NEW SEASON FOR ANY PREY.  IF SO... gather-and-count AND redistribute
+   ]        
 end
 
 ; CONTEXT: Observer
@@ -275,9 +274,10 @@ end
 ; This contains the first layer of the basic logic for whale movement -- the agent-based behavior of whales
 ; This is called only by leaders of the groups, who then direct all whales in their groups to follow.
 to movement-decisions
-  ; show "making movement decisions"
+   RUN-MONITOR 1 "Group leader making a movement decision for group."
+   ask group [update-rest]      ; increment counters indicating length of time since last rest
    ifelse group-tired? [        ; Fatigue takes first precedent in decision making
-     rest
+     ask group [rest]
    ][                           ; ----- Whales are not tired...
      ifelse group-hungry? [     ; If any whales (in the group) need energy, they will try to get food
        ifelse food-present?     ; If the group is hungry, check whether there is food present on this patch
@@ -289,7 +289,6 @@ to movement-decisions
           [travel]             
      ]
   ]
-  ask group [set last-rest last-rest + 1]     ; increment counters indicating length of time since last rest
 end
 
 ; CONTEXT: One whale
@@ -612,15 +611,15 @@ to seek-food
   ;  ... the estimated number of kgs a whale could get hourly if it hunts at the best spot within a 1 day radius is multiplied by the number of hours it will hunt
   let best-nearby max-one-of other water-patches-within travel-radius [kgs-to-be-gained-here group-size]     ; patch in that radius with the most food
   let hourly-gain [kgs-to-be-gained-here group-size] of best-nearby                                          ; hourly kgs expectation to be gained nearby
-  ; hunting hours is number of hours a whale is active in the given number of days, divided by 2 assuming that after hunting the local prey 
-  ; will be hiding and the whale will move locally.
-  let max-hunting-hours (max-active-ratio * evaluation-period * 24) / 2          
-  let kgs-gained hourly-gain * max-hunting-hours
-  let kcals-lost (compute-FMR * evaluation-period)
-  let kgs-lost  ((kcals-lost / WHALE-KCAL-PER-KG) * ENERGY-TO-MASS-EFFICIENCY)
-  let net-gain kgs-gained - kgs-lost
+  let waking-hours (max-active-ratio * evaluation-period * 24)          ; total number of hours a whale is active (not resting) over the given number of days
+  let max-hunting-hours (waking-hours * 0.5)                            ; *** Since hunting causes prey to hide, whales spent 50% of their time moving around locally, and 50% hunting        
+  let kgs-gained (hourly-gain * max-hunting-hours)                      ; with the given number of hours to hunt, how many kgs of food will it get here.
+  let kcals-lost (compute-FMR * evaluation-period)                      ; how many kcals will a whale expend in energy in that same amount of time...
+  let kgs-lost  ((kcals-lost / WHALE-KCAL-PER-KG) * ENERGY-TO-MASS-EFFICIENCY)          ; ...converted to kgs.
+  let net-gain (kgs-gained - kgs-lost)                                  ; expected result of a whale hunting locally               
   
-  ; Keep track of the best possible hunting so far.  If the region is 
+  ; Keep track of the best possible hunting so far.  If the best-region is "nobody", it means the whale hunts locally.
+  ; If the best-region stores the whale's current region, then the whale will start over again near the center of that region.
   let best-region nobody  
   let best-net-gain net-gain
   
@@ -639,10 +638,12 @@ to seek-food
     ; Find the max time that might be spent hunting. 
     ; The evaluation period is in days, and needs to be mutiplied by 24 to convert to hours.
     ; Actual hunting hours is the total number of hours times the ratio of active hours minus the long-distance time spent to travel to the region...
-    ; ... and at the end divided by 2 under the assumption that after whales hunt one spot, the prey there will be hiding and more short-distance travel
-    ; will be needed. *** THE 2 CONSTANT PERHAPS SHOULD CHANGE. IN FACT, IF WHALE'S REST AFTER EATING, THIS MIGHT BE BUILT INTO THE RESTING. HOWEVER
+    ; ... and at the end multiply by .5 under the assumption that after whales hunt one spot, the prey there will be hiding and more short-distance travel
+    ; will be needed. 
+    ; *** AS ABOVE, THE 0.5 CONSTANT PERHAPS SHOULD CHANGE. IN FACT, IF WHALE'S REST AFTER EATING, THIS MIGHT BE BUILT INTO THE RESTING. HOWEVER
     ; WHALE TRACKING DATA SHOW LOTS OF LOCAL MOVEMENT ***
-    set max-hunting-hours (max-active-ratio * evaluation-period * 24 - travel-time) / 2
+    set waking-hours (max-active-ratio * evaluation-period * 24 - travel-time) 
+    set max-hunting-hours (waking-hours * 0.5)
     
     ; Given the number of hours actually hunting, find the total kgs expected to be consumed based on the whale's memory of prior hunting at the given region
     set kgs-gained hourly-gain * max-hunting-hours
@@ -667,7 +668,7 @@ to seek-food
      set destination nobody
      set current-path (list )
      move-to best-nearby
-     ask group [move-to best-nearby]  
+     ask other group [move-to best-nearby]  
   ][  
      RUN-MONITOR 1 (word " has decided to hunt in region " best-region " and is creating a path for that region.")
      set destination [patch-here] of (one-of nodes with [anchor? and nearest-anchor = best-region])  ; ** LIST OF ANCHORS WOULD MAKE THIS MORE EFFICIENT **
@@ -739,10 +740,20 @@ to toward-destination
 end
 
 ;; ===================================== NON-MOVING WHALE BEHAVIOR PROCEDURES =====================================
-; CONTEXT: One whale (should be a group leader)
+; CONTEXT: One whale
+; Indicate the whale is resting.
+; If last-rest is positive, set it to 0 or a negative number to indicate the whale is resting.
+; |last-rest| is the number of additional ticks (after this one) that the whale needs to continue restign. 
 to rest
   RUN-MONITOR 1 " is resting"
-  ask group [set last-rest -1]                 ; whales are resting. At the end of this time step, it will be set to 0 time units since they last rested. 
+  if last-rest >= max-time-without-rest [set last-rest (1 - rest-time)]
+  if last-rest > 0 [set last-rest 0]               
+end
+
+; CONTEXT: One whale.  
+; Update last-rest counter indicating how long since it last rested.  If last-rest < 0, then the whale has just rested.
+to update-rest
+  set last-rest (last-rest + 1)
 end
 
 ; ======================WHALE LIFE DYNAMICS
@@ -828,7 +839,7 @@ end
 ; This reporter is called by a group leader.  It reports true if, for any members of this leader's group, the number
 ; of time periods since the last rest is beyond the threshold for when they get tired.
 to-report group-tired?
-   report any? group with [last-rest > tired-threshold]
+   report any? group with [last-rest >= max-time-without-rest or last-rest < 0]
 end
 
 ; Reporter for a given whale, determines if its currently location has enough food to justify hunting
@@ -980,8 +991,6 @@ to-report starved-to-death?
   report (body-mass < STARVE-END-PERCENT * expected-mass)
 end
 
-
-
 ; CONTEXT: One Whale
 ; This uses probabilistic values to determine if a given whale should die based on its
 ; age, gender, and tables giving the probability of survival.
@@ -1016,6 +1025,12 @@ to-report died-probabilistically?
   ][
   report false
   ]
+end
+
+; The percentage of time a whale spends active if it goes the max time without rest, and then rests the minimum time.
+; It is dependent on the values of the sliders max-time-without-rest and rest-time
+to-report max-active-ratio
+  report (max-time-without-rest / (rest-time + max-time-without-rest))
 end
 
 ;to plot-masses
