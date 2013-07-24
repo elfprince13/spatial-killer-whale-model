@@ -27,7 +27,11 @@
 ;              - distributions-counts[i][j] gives the length of list distributions[i][j][k].  
 ;  
 
-globals [num-seasons  seasons-data distribution-counts distributions    ; See descriptions above
+globals [num-seasons
+    seasons-data 
+    distribution-counts 
+    distributions    ; See descriptions above
+  average-seasonal-area
 ]
 
 patches-own [test-value]
@@ -103,6 +107,9 @@ to load-seasonal-distributions [seasons-file-name species species-num]
   
   let num-classes item NUM-CLASSES# (item species-num prey-data)   ; Get the number of classes for this prey-type. This determines how long each record is.
   
+  let this-average-seasonal-area 0
+  let areal-scale-factor pi / (kmpp * kmpp)
+  
   ; Loop through each season and get all the location data for that season, starting with season 0.
   let season 0                                                  ; Loop counter
   let all-season-locations (list )                              ; The list to hold all data for this prey-type (i.e. species)
@@ -126,14 +133,23 @@ to load-seasonal-distributions [seasons-file-name species species-num]
       
       ; The final 3 numbers describe how prey are distributed around this location.
       set this-location (lput file-read this-location)          ; p-coastal   -- the proportion that should go on coastal patches
-      set this-location (lput file-read this-location)          ; sd-coastal  -- distance in kms containing a standard deviation of the coastally distributed prey
-      set this-location (lput file-read this-location)          ; sd-offshore -- distance in kms containing a standard deviation of the off-shore distributed prey
+      let sd-coastal file-read
+      set this-location (lput sd-coastal this-location)          ; sd-coastal  -- distance in kms containing a standard deviation of the coastally distributed prey
+      
+      let sd-offshore file-read
+      set this-location (lput sd-offshore this-location)          ; sd-offshore -- distance in kms containing a standard deviation of the off-shore distributed prey
 
+      set this-average-seasonal-area this-average-seasonal-area + floor ( sd-coastal * sd-coastal * areal-scale-factor)
+      set this-average-seasonal-area this-average-seasonal-area + floor ( sd-offshore * sd-offshore * areal-scale-factor)
+      
       set this-season-locations (lput this-location this-season-locations)
     ]
     set all-season-locations (lput this-season-locations all-season-locations)
     set season season + 1
   ]
+  
+  set average-seasonal-area replace-item species-num average-seasonal-area (this-average-seasonal-area / seasons-ct)
+  
   set distributions (lput all-season-locations distributions)
  
   file-close
