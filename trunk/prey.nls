@@ -49,6 +49,8 @@ to load-hunting-data
   set prey-data (list)          ; Data that pertains to an entire species, and not just an age class
   init-distribution-structures 
   
+  set average-seasonal-area n-values 2 [0] ; this should be equal to the number of species loaded
+  
   load-data "harbor-seals.txt"
   load-seasonal-distributions "seal-seasons.txt" "Harbor Seals" 0 
   
@@ -169,10 +171,10 @@ end
 ; report the vulnerability value (probability of getting killed in an encounter) for the prey-type with the given index for a group of whales of the given size
 ; prey-type is an index holding  one of harbor-seals#, harbor-seals0#, dall-porpoises#, etc. 
 ; group-size is the number of whales attacking
-to-report vulnerability [ prey-type group-size ]
-  let vulnA (item VULNA# (item prey-type hunting-data))
-  let vulnB (item VULNB# (item prey-type hunting-data) )
-  let vulnMax (item VULNMAX# (item prey-type hunting-data) )
+to-report vulnerability [ prey-type class-num group-size ]
+  let vulnA (item VULNA# (item class-num (item prey-type hunting-data)))
+  let vulnB (item VULNB# (item class-num (item prey-type hunting-data) ))
+  let vulnMax (item VULNMAX# (item class-num (item prey-type hunting-data) ))
   let x exp (vulnA + vulnB * (group-size - 1))
   report vulnMax * (x / (1 + x))
 end
@@ -183,7 +185,7 @@ to-report encounter-rate [ prey-type class-type ]
    report (item ENCOUNTER-RATE# (item class-type (item prey-type hunting-data)))
 end
 
-to-report spatial-encounter-rate [ class-type prey-type ]
+to-report spatial-encounter-rate [ prey-type class-type ]
   ; The encounter rate as used in formulas must have the following units (where er is the encounter rate):
   ;
   ; er ∝ (1 / hunting-groups) (1 / days)
@@ -227,17 +229,20 @@ to-report spatial-encounter-rate [ class-type prey-type ]
   ; we will idealize these regions as circles. The distribution with a pdf(u) = |u| e^-((u^2)/2)  (where u = (x / sigma)) is normalized, 
   ; yields a circle with normal density at radius u (the density at any point on the circle is obviously pdf(u) / (2π), as it must be swept around).
   ;
-  ; Thus area-hunted_ns = π * Sum(sigma_i ^ 2, i = 1 .. # prey sites), which in practice thus far can be reduced to simple multiplication
+  ; Thus area-total_ns = π * Sum(sigma_i ^ 2, i = 1 .. # prey sites), which in practice thus far can be reduced to simple multiplication
   ; as the sigma for each prey type and season is constant in our data files.
   ;
   ; < prey-present / area-hunted_ns> is then approximated as
-  ; < prey-present / area-hunted_ns> = Integral( pdf(u), u = 0..1) * prey-total / area-hunted_ns = (1 - 1/sqrt(e)) * prey-total / area-hunted_ns
+  ; < prey-present / area-hunted_ns> = Integral( pdf(u), u = 0..1) * prey-total / area-total_ns = (1 - 1/sqrt(e)) * prey-total / area-total_ns
   ;
   ; area-hunted_s is trivially kmpp * kmpp, but prey-density(x,y) will always be an integer / (kmpp * kmpp), 
-  ; so those can trivially both be made unitless, and area-hunted_s set = 1.
+  ; so those can trivially both be made unitless, and area-hunted_s set = 1. Even better, we will assume that whales
+  ; in either model are able to cover equal area in equal time, so the ratio (area-hunted_s / area_hunted_ns) can be set = -1
   ;
-  ; Then the final form for f(er,x,y) = (area-hunted_s / area-hunted_ns) * (prey-density(x,y) / ((1 - 1/sqrt(e)) * prey-total / area-hunted_ns)) * er
-  ;                                   = er * prey-density(x,y) * (1 patch area) / ((1 - 1/sqrt(e)) * prey-total)
+  ; 
+  ;
+  ; Then the final form for f(er,x,y) = (area-hunted_s / area-hunted_ns) * (prey-density(x,y) / ((1 - 1/sqrt(e)) * prey-total / area-total_ns)) * er
+  ;                                   = er * prey-density(x,y) * (area-total_ns) / ((1 - 1/sqrt(e)) * prey-total)
   ;
   ; However, keep in mind that this value must still be multiplied by prey-total to be consistent with the original formula.
   ; Also keep in mind that the units of time for the original non-spatial simulation are in days rather than hours.
@@ -248,15 +253,16 @@ to-report spatial-encounter-rate [ class-type prey-type ]
   ;   Finally, we convert the (1 / days) dependence to (1 / hours) by straightforward division by 24
   ;
   ; We'll call this new function fbar:
-  ; fbar(er) = er / (24 * (1 - 1/sqrt(e))) = er / (24 * 0.39346934) = er * 0.1058955867723666
+  ; fbar(er) = er * area-total_ns / (24 * (1 - 1/sqrt(e))) = er / (24 * 0.39346934) = er * area-total_ns * 0.1058955867723666
   let nonspatial-encounter-rate encounter-rate prey-type class-type
-  report nonspatial-encounter-rate * 0.1058955867723666
+  report nonspatial-encounter-rate * (item prey-type average-seasonal-area) * 0.1058955867723666
 end
 
 to-report expected-prey-encounters-by-area [patchcount prey-count prey-type class-num effective-group-size]
   let avg-prey-encountered (spatial-encounter-rate prey-type class-num) * prey-count * (1 - hiding-effectiveness)
+  set avg-prey-encountered ifelse-value(patchcount = 0)[0][avg-prey-encountered]
   ; Now turn the expected number of prey encountered into an expected number killed based on vulnerability to a group this size
-  let vuln (vulnerability prey-type effective-group-size)  ; get the vulernability of this prey-type
+  let vuln (vulnerability prey-type class-num effective-group-size)  ; get the vulernability of this prey-type
   let avg-catch-size (avg-prey-encountered * vuln)
   
   report avg-catch-size
@@ -299,13 +305,19 @@ end
 
 ; Reports the current expected mass of the prey of the given prey-type based on the day number.
 ; This is a linear scale from START-MASS to END-MASS over the length of one year from birth-date.
-to-report current-mass [prey-type class-num]
+; Reports the current expected mass of the prey of the given prey-type based on the day number.
+; This is a linear scale from START-MASS to END-MASS over the length of one year from birth-date.
+to-report prey-mass-on-day [prey-type class-num d]
   let birthday (item BIRTHING-DATE# (item class-num (item prey-type hunting-data)))   ; date in which this prey jumped an age class
-  let extra-days (days - birthday) mod 365                        ; how many days into the age class is this prey?
+  let extra-days (d - birthday) mod 365                        ; how many days into the age class is this prey?
   let ratio (extra-days / 365)                                    ; linear scale from start weight to end weight
   let start-wt (item START-MASS# (item class-num (item prey-type hunting-data)))
   let end-wt (item END-MASS# (item class-num (item prey-type hunting-data)))
   report start-wt + ratio * (end-wt - start-wt)
+end
+
+to-report current-mass [prey-type class-num]
+  report prey-mass-on-day prey-type class-num days
 end
 
 ; This is actually the same mapping as provided by get-season-from-day in

@@ -55,12 +55,21 @@ to-report request-classlist-estimate [prey-type class-num this-loc]
   report i-num-here
 end
 
-to-report request-prey-estimate [cache prey-type day hunting-region-no]
+to-report expected-prey-encounters-by-area-serial [patchcount prey-count prey-type effective-group-size]
+  let class-nums n-values (length prey-count) [?]
+  report (map [expected-prey-encounters-by-area ?1 ?2 prey-type ?3 effective-group-size] patchcount prey-count class-nums)
+end
+
+to-report idealized-cdf [x]
+  report 1 -  exp (- ((x ^ 2) / 2))
+end
+
+to-report request-prey-estimate [cache prey-type day hunting-region-no effective-group-size]
   let season-index current-prey-season prey-type day
-  print (WORD "Season: " season-index)
+  ;print (WORD "Season: " season-index)
   let pcachegrid item prey-type cache
   let scacheline item season-index pcachegrid
-  show (WORD "moo " scacheline)
+  ;show (WORD "moo " scacheline)
   let prey-estimate item hunting-region-no scacheline
   let ct-classes (item NUM-CLASSES# (item prey-type prey-data))               ; The number of age classes for this prey type
   
@@ -69,7 +78,8 @@ to-report request-prey-estimate [cache prey-type day hunting-region-no]
     let ct-locations (item season-index (item prey-type distribution-counts))   ; The number of locations for distribution for this prey type an this season
     
     set scacheline init-nlist (length scacheline) (task 0) ct-classes
-    show (WORD "boo " scacheline)
+    let scacheline-cts scacheline
+    ;show (WORD "boo " scacheline)
     let loc 0
     repeat ct-locations[
       let this-loc (item loc (item season-index (item prey-type distributions)))   ; distributions[i][j][k] is the kth location for season j for prey type i
@@ -79,7 +89,6 @@ to-report request-prey-estimate [cache prey-type day hunting-region-no]
       ;show this-loc
       let central-patch long-lat-patch long lat
       let len (length this-loc)
-      let p-coastal (item (len - 3) this-loc)
       let coastal-sd (item (len - 2) this-loc)
       let offshore-sd (item (len - 1) this-loc)
           
@@ -98,9 +107,14 @@ to-report request-prey-estimate [cache prey-type day hunting-region-no]
       let target-region [hunting-region] of central-patch
       set scacheline replace-item target-region scacheline (map [?1 + ?2] cvals (item target-region scacheline))
       
+      ; 0.3934693402873666 is a magic number. See derivation in spatial-encounter-rate from prey.nls (but we only go to 0.05 sd)
+      ; We'll divide by it here, rather than multiply by it in cvals to cut down on the number of operations that must be performed
+      let target-area ((floor ((pi * offshore-sd * offshore-sd) / (kmpp * kmpp))) + (floor ((pi * coastal-sd * coastal-sd) / (kmpp * kmpp))) ) / 0.3934693402873666
+      set scacheline-cts replace-item target-region scacheline-cts (map [target-area + ?] (item target-region scacheline-cts))
       
       set loc 1 + loc
     ]
+    set scacheline (map [expected-prey-encounters-by-area-serial ?2 ?1 prey-type effective-group-size] scacheline scacheline-cts)
     set pcachegrid replace-item season-index pcachegrid scacheline
     set cache replace-item prey-type cache pcachegrid
     
@@ -112,10 +126,37 @@ end
 ; For each hunting season, give each whale a memory of hunting in a certain number of regions .
 to initialize-random-whale-memories [ num-regions ]
   let season-number 0
+  let prey-estimation-cache initialize-prey-estimation-cache num-regions
+  let leaders-list sort leaders
+  let leaders-ct count leaders
+  let half-off floor (leaders-ct / 2)
+  
+  let gs mean [sum [effective-size] of group] of leaders
+  
   repeat number-hunting-seasons [
+     let region-no 0
      repeat num-regions [
        let d random-day-in-season season-number
-       let pt random num-prey-types
+       let prey-type 0
+       repeat num-prey-types [
+         let rpe request-prey-estimate prey-estimation-cache prey-type d region-no gs
+         let prey-estimate (item 0 rpe)
+         set prey-estimation-cache (item 1 rpe)
+         
+         let class-counts length prey-estimate
+         let class-indices n-values class-counts [?]
+         
+         let kgs (sum (map [?1 * prey-mass-on-day prey-type ?2 d] prey-estimate class-indices)) / gs
+         
+         let cw (item (region-no mod leaders-ct) leaders-list)
+         let ocw (item ((region-no + half-off)  mod leaders-ct) leaders-list)
+         
+         ask cw [update-whale-memory season-number region-no kgs * effective-size]
+         ask ocw [update-whale-memory season-number region-no kgs * effective-size]
+         ask n-of 3 (leaders with [self != cw and self != ocw]) [update-whale-memory season-number region-no kgs * effective-size]         
+         
+         set prey-type 1 + prey-type  
+       ]
        ;; For the given prey type pt and the given day d, compute hot-spot and expected-counts where..
        ;; hot-spot is a patch 
        ;; expected-counts is a list of rough estimate of how many prey of each class would end up in that patch after distribution during day d
@@ -135,8 +176,9 @@ to initialize-random-whale-memories [ num-regions ]
        ; 
        ;
        ;;;;;;;;;;;;;;;;;;;;;;;;
+       set region-no 1 + region-no
      ]
-     set season-number (season-number + 1) 
+     set season-number 1 + season-number 
   ]
 end
 
@@ -155,6 +197,11 @@ end
 ;    region -- the hunting region in which this whale hunted
 ;    kg-consumed -- the mass of prey consumed by the whale in this hunting event.
 to update-whale-memory [sn h-region kg-consumed]
+  ; special case: no memories yet!
+  if memory = 0 [
+    set memory n-values (ceiling (365 / days-per-hunting-season)) [[]]
+  ]
+  
   let season-memory (item sn memory)                ; Get the memory record for this season for the memory list for all seasons
   
   ; special case: this is the first entry into the whale's memory for this season
