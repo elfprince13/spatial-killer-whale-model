@@ -119,6 +119,8 @@ to setup
   file-open file-name
   RUN-MONITOR 0 (word "Whale test run on " date-and-time " with " INITIAL-NUMBER-WHALES " whales.") 
 
+  ask water [set visited? -1]    ;; **** COMMENT HERE... AND ON THE USE OF VISITED... AND REVISIT WATER-PATCHES-WITHIN in MAP ********
+  
   reset-ticks
 end
 
@@ -612,7 +614,8 @@ to seek-food
   ; Estimate the whale's net weight gain (or loss if the number is negative) if it remains hunting nearby for the given number of days in evaluation-period.
   ; To compute the kgs of food consumed...
   ;  ... the estimated number of kgs a whale could get hourly if it hunts at the best spot within a 1 day radius is multiplied by the number of hours it will hunt
-  let best-nearby max-one-of other water-patches-within travel-radius [kgs-to-be-gained-here group-size]     ; patch in that radius with the most food
+  let nearby water-patches-within travel-radius 
+  let best-nearby max-one-of nearby [kgs-to-be-gained-here group-size]     ; patch in that radius with the most food
   let hourly-gain [kgs-to-be-gained-here group-size] of best-nearby                                          ; hourly kgs expectation to be gained nearby
   let waking-hours (max-active-ratio * evaluation-period * 24)          ; total number of hours a whale is active (not resting) over the given number of days
   let max-hunting-hours (waking-hours * 0.5)                            ; *** Since hunting causes prey to hide, whales spent 50% of their time moving around locally, and 50% hunting        
@@ -672,13 +675,14 @@ to seek-food
      set current-path (list )
      move-to best-nearby
      ask other group [move-to best-nearby]  
-     hunt
+     if [visited?] of best-nearby < travel-radius / 2 [hunt]   ;  **** If travel time less than 1/2 hour, then travel and hunt in the same turn. MODIFY *****
   ][  
      RUN-MONITOR 1 (word " has decided to hunt in region " best-region " and is creating a path for that region.")
      set destination [patch-here] of (one-of nodes with [([id] of nearest-anchor) = best-region])  ; ** LIST OF ANCHORS WOULD MAKE THIS MORE EFFICIENT **
      set current-path sparse-path-to-patch destination
      travel 
    ]
+   ask nearby [set visited? -1]           ; ******* PART OF THE USE OF visited? NEEDING COMMENTING **********
 end
 
 
@@ -694,7 +698,7 @@ end
 to travel
    RUN-MONITOR 1  (word "is traveling, starting at " patch-here)
    if destination = nobody [
-     choose-destination
+;     choose-destination
      RUN-MONITOR 1 (word " chose destination " destination)
    ]
    ; If no path exists, compute a path from the current patch to the destination.
@@ -705,9 +709,9 @@ to travel
    toward-destination
 end
 
-to choose-destination
-    set destination one-of best-hunting-grounds      ; The whale's current destination -- initially any of the best hunting grounds.
-end
+;to choose-destination
+;    set destination one-of best-hunting-grounds      ; The whale's current destination -- initially any of the best hunting grounds.
+;end
 
 ; Follow the path of patches stored in current-path for whatever distance a whale can travel in one time step.
 ; Assumes that current-path is not empty, and that it starts with the whale's current patch or an adjacent patch.
@@ -716,6 +720,7 @@ to toward-destination
    let group-size (sum [effective-size] of group)   ; ** CAN BE USED TO DECIDE WHETHER TO PAUSE AND HUNT LOCALLY **
    
    RUN-MONITOR 1 (word " moving toward " destination " a distance of " patches-can-travel " patches.")
+   DEBUG-MONITOR 1 (word " moving toward " destination " along path " current-path)
    
    ; Whale should now keep moving until the total movement is equal to its maximum hourly travel distance.
    ; *** LATER ADD A WAY TO BREAK OUT OF THIS LOOP IF FODO IS FOUND -- ALSO A PROBABILISTIC VARIATION FROM THE ROUTE.
