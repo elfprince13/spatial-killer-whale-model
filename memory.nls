@@ -85,6 +85,7 @@ to-report request-prey-estimate [cache prey-type day hunting-region-no effective
       ;show this-loc
       let central-patch long-lat-patch long lat
       let len (length this-loc)
+      let p-coastal (item (len - 3) this-loc)
       let coastal-sd (item (len - 2) this-loc)
       let offshore-sd (item (len - 1) this-loc)
           
@@ -101,11 +102,13 @@ to-report request-prey-estimate [cache prey-type day hunting-region-no effective
       
       
       let target-region [hunting-region] of central-patch
-      set scacheline replace-item target-region scacheline (map [?1 + ?2] cvals (item target-region scacheline))
       
-      ; 0.3934693402873666 is a magic number. See derivation in spatial-encounter-rate from prey.nls (but we only go to 0.05 sd)
-      ; We'll divide by it here, rather than multiply by it in cvals to cut down on the number of operations that must be performed
-      let target-area ((floor ((pi * offshore-sd * offshore-sd) / (kmpp * kmpp))) + (floor ((pi * coastal-sd * coastal-sd) / (kmpp * kmpp))) ) / 0.3934693402873666
+      
+      ; An idealized offshore distribution is circular, an idealized coastal distribution is a strip.
+      ; 0.3934693402873666 is a magic number. See derivation in spatial-encounter-rate from prey.nls (but we only go to 1 sd)
+      ; 0.640913004920576 is a magic number. See the normal distribution.
+      set scacheline replace-item target-region scacheline (map [((((1 - p-coastal) * 0.3934693402873666) + (p-coastal * 0.640913004920576)) * ?1) + ?2] cvals (item target-region scacheline))
+      let target-area ((floor ((pi * offshore-sd * offshore-sd) / (kmpp * kmpp))) + (floor (coastal-sd /  kmpp)))
       set scacheline-cts replace-item target-region scacheline-cts (map [target-area + ?] (item target-region scacheline-cts))
       
       set loc 1 + loc

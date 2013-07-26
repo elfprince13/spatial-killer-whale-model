@@ -614,7 +614,7 @@ to seek-food
   ; Estimate the whale's net weight gain (or loss if the number is negative) if it remains hunting nearby for the given number of days in evaluation-period.
   ; To compute the kgs of food consumed...
   ;  ... the estimated number of kgs a whale could get hourly if it hunts at the best spot within a 1 day radius is multiplied by the number of hours it will hunt
-  let nearby water-patches-within travel-radius 
+  let nearby water-patches-within travel-radius 0
   let best-nearby max-one-of nearby [kgs-to-be-gained-here group-size]     ; patch in that radius with the most food
   let hourly-gain [kgs-to-be-gained-here group-size] of best-nearby                                          ; hourly kgs expectation to be gained nearby
   let waking-hours (max-active-ratio * evaluation-period * 24)          ; total number of hours a whale is active (not resting) over the given number of days
@@ -719,8 +719,8 @@ to toward-destination
    let patches-can-travel (whale-speed / kmpp)      ; distance (in patch units) a whale can travel in one time step
    let group-size (sum [effective-size] of group)   ; ** CAN BE USED TO DECIDE WHETHER TO PAUSE AND HUNT LOCALLY **
    
-   RUN-MONITOR 1 (word " moving toward " destination " a distance of " patches-can-travel " patches.")
-   DEBUG-MONITOR 1 (word " moving toward " destination " along path " current-path)
+   RUN-MONITOR 3 (word " moving toward " destination " a distance of " patches-can-travel " patches.")
+   DEBUG-MONITOR 3 (word " moving toward " destination " along path " current-path)
    
    ; Whale should now keep moving until the total movement is equal to its maximum hourly travel distance.
    ; *** LATER ADD A WAY TO BREAK OUT OF THIS LOOP IF FODO IS FOUND -- ALSO A PROBABILISTIC VARIATION FROM THE ROUTE.

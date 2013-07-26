@@ -136,8 +136,9 @@ to load-seasonal-distributions [seasons-file-name species species-num]
       let sd-offshore file-read
       set this-location (lput sd-offshore this-location)          ; sd-offshore -- distance in kms containing a standard deviation of the off-shore distributed prey
 
-      set seasonal-total seasonal-total + (floor ( sd-coastal * sd-coastal * areal-scale-factor) + floor ( sd-offshore * sd-offshore * areal-scale-factor))
-      show (WORD "Season " season ": " seasonal-total "  ( " sd-coastal " " sd-offshore " " areal-scale-factor " )")
+      ; An idealized offshore distribution is circular, an idealized coastal distribution is a strip.
+      set seasonal-total seasonal-total + (floor ( sd-coastal / kmpp) + floor ( sd-offshore * sd-offshore * areal-scale-factor))
+      DEBUG-MONITOR 3 (WORD "Season " season ": " seasonal-total "  ( " sd-coastal " " sd-offshore " " areal-scale-factor " )")
       
       set this-season-locations (lput this-location this-season-locations)
     ]
@@ -210,7 +211,7 @@ to seasonal-distribution [prey-type day-of-year]
     ; list contains long lat age-class-percentages-for-all-age-classes p-coastal coastal-sd offshore-sd
     let long (item 0 this-loc)
     let lat (item 1 this-loc)
-    show this-loc
+    DEBUG-MONITOR 2 this-loc
     let central-patch long-lat-patch long lat
     let len (length this-loc)
     let p-coastal (item (len - 3) this-loc)
@@ -242,12 +243,12 @@ to seasonal-distribution [prey-type day-of-year]
       let prey-list (item prey-type hunting-data)                       ; Extract from hunting data the list of data for this prey type
       let class-list (item class-num prey-list)                         ; Extract from list of data for this prey type the list of data for this age class
       let members (item GLOBAL-POP# class-list)                         ; Get the number of prey of this age class in the total population
-      DEBUG-MONITOR 2 (word "Distributing age class " class-num " with " members " individuals.")
+      DEBUG-MONITOR 3 (word "Distributing age class " class-num " with " members " individuals.")
            
       let prop-here (item (class-num + 2) this-loc)                      ; Proportion of total population to distribute around this area for this age class
       let num-here round (prop-here * members)                           ; Total number to go here based on percental of total population of this age class
       let i-num-here ifelse-value((members - num-here) < 0) [members][num-here]                                      ; compute the integer version.
-      DEBUG-MONITOR 2 (word this-loc " will get " prop-here " of the total members of this age class, which is " i-num-here " individuals.")
+      DEBUG-MONITOR 3 (word this-loc " will get " prop-here " of the total members of this age class, which is " i-num-here " individuals.")
 
       distribute-prey-about-patch prey-type class-num i-num-here central-patch p-list listed-prey-patches loc-distributions
        
@@ -348,7 +349,7 @@ to distribute-prey-about-patch [prey-type class-type prey-count central-patch pr
   let prey-remaining prey-count
   ; Can't nest reporter-tasks, so foreach is out :(
   
-  show (WORD "Distributing prey about patch " central-patch)
+  DEBUG-MONITOR 3 (WORD "Distributing prey about patch " central-patch)
   
   repeat num-patch-types [
     
@@ -367,13 +368,13 @@ to distribute-prey-about-patch [prey-type class-type prey-count central-patch pr
             
       (foreach cur-distribution cur-patchsets [
         let near-patches count ?2
-        if (?1 < 0) [ print (WORD "A negative value of " ?1 " appeared")]
+        if (?1 < 0) [ DEBUG-MONITOR 1 (WORD "A negative value of " ?1 " appeared")]
         ifelse (near-patches > 0) [
           set p-buffer lput ?2 p-buffer
           distribute-n-over-m-patches prey-type class-type ?1 ?2
         ][
           if (?1 > 0)[ set dist-buffer lput ?1 dist-buffer]
-          print (WORD "no patches at distance for patchset " ?2 " (missing " ?1 " prey)")
+          DEBUG-MONITOR 1 (WORD "no patches at distance for patchset " ?2 " (missing " ?1 " prey)")
         ]
       ])
       
@@ -381,20 +382,20 @@ to distribute-prey-about-patch [prey-type class-type prey-count central-patch pr
       ; This happens when a cell is weighted for 0 (because none exist at the radius)
       ; But the rounding error correction determines it is still needed! 
       
-      show dist-buffer
-      show p-buffer
+      ;show dist-buffer
+      ;show p-buffer
       let ap-count length p-buffer
       let db-count length dist-buffer
       ifelse (ap-count > 0 and db-count > 0)[
         set p-buffer n-values (db-count) [(item (? mod ap-count) p-buffer)]
-        show p-buffer
+        ;show p-buffer
       
         (foreach dist-buffer p-buffer [
           distribute-n-over-m-patches prey-type class-type ?1 ?2
         ])
       ][
-        ifelse (db-count > 0) [ print " O_o no patches were ever found!"]
-        [ print "no corrections necessary" ]
+        ifelse (db-count > 0) [ DEBUG-MONITOR 1 " O_o no patches were ever found!"]
+        [ DEBUG-MONITOR 2 "no corrections necessary" ]
       ]
       
     ]
