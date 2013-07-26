@@ -92,10 +92,6 @@ patches-own [
   to-node       ; next patch on the path toward the nearest node, or self is nearest node on this patch
 ]
 
-to SETUP-MONITOR [x y]
-  if SETUP-MONITOR-LEVEL > x [show y]
-end
-
 ; Information about the world is imported from two files.
 ; The first file is a text file that contains information such as the long-lat coordinates of the world, the dimension of the world, etc.
 ; The first line of the text file contains the name of a second file, an image file, that has the world map in grey-scale with black pixels

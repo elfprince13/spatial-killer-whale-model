@@ -57,11 +57,7 @@ end
 
 to-report expected-prey-encounters-by-area-serial [patchcount prey-count prey-type effective-group-size]
   let class-nums n-values (length prey-count) [?]
-  report (map [expected-prey-encounters-by-area ?1 ?2 prey-type ?3 effective-group-size] patchcount prey-count class-nums)
-end
-
-to-report idealized-cdf [x]
-  report 1 -  exp (- ((x ^ 2) / 2))
+  report (map [expected-prey-encounters-by-area ?1 ?2 prey-type ?3 effective-group-size 0] patchcount prey-count class-nums)
 end
 
 to-report request-prey-estimate [cache prey-type day hunting-region-no effective-group-size]
