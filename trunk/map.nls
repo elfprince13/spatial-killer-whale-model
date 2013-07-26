@@ -266,7 +266,7 @@ end
 ; horizontally, vertically, and diagonally, but never across land. It is thus an approximation of (and always at least as great as) the
 ; shortest distance a whale would actually travel to reach the given patch. Meaning that the number of patches returned will be smaller than
 ; the actual number reachable by whales traveling distance d.
-to-report water-patches-within [d]
+to-report water-patches-within [d cscale]
   set visited? 0               
   let queue (list self)
   
@@ -283,7 +283,7 @@ to-report water-patches-within [d]
         if water? and (visited? < 0) [
          let best-neighbor min-one-of neighbors with [water? and (visited? >= 0) and (segment-on-water? ([pxcor] of myself) ([pycor] of myself) pxcor pycor )] [visited? + (distance myself)]
          set visited? ([visited? + (distance myself)] of best-neighbor)
-         set pcolor (pcolor + .55)
+         set pcolor (pcolor + (.55 * cscale))
          set queue lput self queue 
         ]
       ]
@@ -297,7 +297,7 @@ end
 
 ; Same as above, but returns the patches in an ordered list (ordered by distance) as (patch,distance) pairs.
 to-report water-patches-within-to-list [dists filters]
-  let all-patches (water-patches-within (max dists))
+  let all-patches (water-patches-within (max dists) 1)
   ask all-patches [set visited? round visited?]
   let patch-subsets map [all-patches with [(runresult ? self)]] filters
   report (list all-patches patch-subsets (map subset-at-dist patch-subsets dists))
@@ -1086,6 +1086,10 @@ to color-hunting-regions
   ask patches [set pcolor hunting-region-color]
 end
 
+to color-hunting-regions-dark
+  ask patches [set pcolor hunting-region-color-dark]
+end
+
 to-report hunting-region
   report [id] of ([nearest-anchor] of nearest-node)
 end
@@ -1097,6 +1101,11 @@ end
 
 to-report hunting-region-color
   if water? [report hunting-region * 10 + 7.5]
+  report green - 2
+end
+
+to-report hunting-region-color-dark
+  if water? [report hunting-region * 10]
   report green - 2
 end
 
@@ -1169,11 +1178,11 @@ to-report find-a-shore [coastal-patch]
   let shore-patch nobody
   ifelse (not ([coastal?] of coastal-patch)) [
     ifelse (not ([water?] of coastal-patch))[
-      DEBUG-MONITOR 1 (word coastal-patch " is not in the water, trying to find some coastline")
+      DEBUG-MONITOR 2 (word coastal-patch " is not in the water, trying to find some coastline")
       set shore-patch coastal-patch
       set coastal-patch min-one-of (([neighbors] of shore-patch) with [coastal?]) [distance shore-patch]
     ][
-      DEBUG-MONITOR 1 (word coastal-patch " is not a coastal patch, finding coast too")
+      DEBUG-MONITOR 2 (word coastal-patch " is not a coastal patch, finding coast too")
       set shore-patch ([nearest-land] of coastal-patch)
       set coastal-patch min-one-of (([neighbors] of shore-patch) with [coastal?]) [distance shore-patch]
     ]
