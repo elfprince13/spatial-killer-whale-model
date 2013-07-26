@@ -1309,39 +1309,101 @@ HORIZONTAL
 @#$#@#$#@
 ## WHAT IS IT?
 
-This section could give a general understanding of what the model is trying to show or explain.
+This is a spatial individual-based model of killer whale life-cycle dynamics in southeast Alaska. The emphasis is on predation and whale movement, including whale physiology. However life-cycle dynamics also require modeling reproduction and mortality, with mortality based on physiology, which is modeled using metabolism and consumption (and thus predation success.)
 
-## HOW IT WORKS
+Whales are modeled as individuals.  The temporal granularity is one tick = one hour.
 
-This section could explain what rules the agents use to create the overall behavior of the model.
+Prey are not modeled as individuals; they are modeled as population counts at the spatial granularity level. The spatial granularity is patches of size approximately .6km x .6km. Thus each ~.36km2 patch has a population count for each age class of each prey species included in the model.  Successful hunting and consumption of prey in a spatial patch reduces the population count of that prey on that patch. Prey mortality due to non-whale factors, as well as reproduction (seasonal adjustments of age classes) is handled stochastically at a population-wide level.
+
+(* Future enhancements will include whale group social dynamics such as fusion and fission events. *)
+
 
 ## HOW TO USE IT
 
-This section could explain how to use the model, including a description of each of the items in the interface tab.
+Set the values of the sliders, or press the <default> button to reset them.
+Press <setup> and get some coffee. It will take a few minutes to initialize the map and geography, read the prey files and load the data files then seasonally disburse the prey, and final create and initialize the whales including their memory.
+
+TO IMPLEMENT: RANDOM vs PRECREATED SETUP
+
+Press <run> and watch.
+
+It is not recommended that you adjust the sliders during a run. Set the sliders, watch what happens, then adjust.  
+
+COMMENT ON: OUTPUT FILES
+
+## HOW IT WORKS: IMPORTANT CONSTANTS:
+
+There are numerous program constants directly impacting a killer whale's hunting success, and thus the population dynamics of  both the predator (killer whales) and the prey populations. Some are given as sliders to make it easier for the user to experiment with different values. Some are defined as globals and initialized within the program, typically in the constants file.
+
+Below is a list of important constants (globals and slider) arranged in groups. These can be changed in the code or with sliders.  They should all be set at the start of the run.
+
+The sliders max-time-without-rest and rest-time both have hours as units, and collectively determine the maximum ratio of time that a whale is active, either traveling or hunting.  
+•	The slider max-time-without-rest determines the maximum number of hours a whale can hunt or travel before it needs to rest.  
+•	The slider rest-time determines the minimum number of hours a whale must rest before it can become active again.  
+Thus (max-time-without-rest / (max-time-without-rest + rest-time)) is the maximum ratio of time a whale is active.
+
+As soon as killer whales hunt in an area (for a single hour = 1 tick), prey in that area will go into hiding and become more difficult to hunt. There are three constants that determine the level of hiding. 
+•	The slider hiding-radius determines over how large a spatial area prey will be aware of hunting whales and go into hiding. When whales hunt in a given patch, then all prey within hiding-radius of that patch will start hiding for some period of time, and thus a larger value of this slider favors prey and a smaller value favors killer whales.
+•	The global constant hiding-effectiveness determines how effective prey are at hiding.  Specifically, it represents the proportion of prey that will not be seen by a whale when prey are hiding in the given patch.  When prey are hiding, the encounter rate is multiplied by (1- hiding-effectiveness) to determine the number of prey encountered thus a larger value of this slider favors prey and a smaller value favors killer whales.
+•	The global constant hiding-time determines how long in hours that prey hiding after whales have hunted within the hunting-radius of that patch, thus a larger value of this slider favors prey and a smaller value favors killer whales.
+
+About Encounter Rates
+
+The other most important value that determines the effectiveness of hunting whales—and thus has the greatest impact on population dynamics of both predator and prey—is the prey-specific encounter rate, which is entered from prey-specific data files. This rate is a multiplicative factor that determines the number of prey a hunting pod of whales will encounter as a function of the density of the prey – that is, the number of prey in a single spatial unit: a .36 km2 patch.  The encounter rate R' entered from the file data is the rate used by the non-spatial model of Testa, Mock, et al. That encounter rate was fine-tuned as described in the paper "Agent-based modeling of the dynamics of mammal-eating killer whales and their prey" [TKTKCW].  In that model, the number E' of a given prey type a whale group sees in a day is computed as E'=P'*R' where P' is the global count of the given type of prey and R' is the encounter rate specific to that type of prey.
+
+Our spatially-explicit model requires a new encounter rate R based on a much finer spatial and temporal granularity.  Rather than starting from scratch to experimentally determine a new rate, we applied a multiplicative transformation factor T to the existing encounter rate to compute R=T*R'. The value of T was based on several (reasoned) assumptions and some guesswork, and the result will certainly have to be adjusted and fine-tuned. 
+
+Before explaining the transformation, it is worth considering units. Let P = prey count, R = encounter rate, and let E be the number of prey actually encountered. As with the previous model, E is the value we want to compute. E=P*R. Note the following.
+•	P, though given as a prey count, is actually a density of prey—that is, a number of prey over a certain area. Its units are thus (prey / km2). 
+•	E should give us a number of prey that are encountered by the hunting group in a given amount of time.  So units should be (prey / hr).   Note. It could be considered as (prey / hr * group), but the group is assumed.
+•	It follows that the units for the ecnounter rate R must (km2 / hr).   Intuitively this makes sense, as it relates to the amount of space a whale group can search in an hour.  (As with the above, it could be considered as km2 / hr *group but the group is assumed.)
+
+The previous model of [TKTKCW], though it does not explicitly represent as a spatial model, can be considered a very coarse spatial granularity where all of SE Alaska is a single spatial unit. The temporality granularity of the earlier project was units of one day.  Again, let E'=P'*R' be the values used in the previous model.  So at the simplest level, the transformation R=T*R' must adjust the encounter rate R' used in the previous "non-spatial" model (which is a rate for all of SE Alaska for 24 hours of hunting) for a different unit of time.  The first step seems simple: to change the rate from (prey / day) to (prey / hr) we multiply by (1 day / 24 hours). That is we start by setting T=1/24 and thus R=R'/24.
+
+However the count in P' was also assumed to have a different area, and thus a different density. Our value of P is the count of prey is only ~.36km2. We must multiply by approximately 370,000 to scale that to a prey count for the region of SE Alaska being modeled. So a first approximately for T is T=370000/24.
+
+  Unfortunately this simplification fails in both temporal and spatial regards by assuming non-realistic simplifications. First, whales do not hunt for all 24 hours of a day. Rather than dividing by 24, we should divide by the average number of hours a day a whale actually hunts. Second, prey are not distributed uniformly, and whales do not hunt in random locations but (presumably) in areas of dense distribution.  To account for that, we approximate the number of hours per day a whale hunts using the max-time-without-rest and rest-time sliders described above. Second, we compute a typical dense prey patch rather than a uniform distribution of prey, and use the ratio of that prey patch to the global populate count as the multiplicative factor. This is all still a rough estimate to be fine-tuned.
+
+## HOW IT WORKS: WHALE MEMORY AND IMPORTANT RELATED CONSTANTS AND SLIDERS
+
+Each whale keeps an updated a memory of past hunting experiences.  The world is divided into approximately 70 hunting regions. (To color the world by hunting region, set the map-mode to "hunting regions" and press <redraw>.)  A whale's year is divided into a number of hunting seasons whose length is determined by the slider days-per-hunting-season (plus one final hunting season at the end of the year for any leftover days, if days-per-hunting-season does not divide 365.) Thus if days-per-hunting-season=100, a whale will have season 0 running from day 0 to day 99, season 1 running from day 100 to day 199, season 2 running from day 200 to day 299, and season 3 running from day 300 to day 364. 
+
+For each hunting season, a whale keeps track of every hunting region in which it has hunted during that season, and for each such season has a total number of kgs of food consumed and a total number of hours hunted. Thus the memory tells a whale for each season the average  (kgs/hour) of prey hunted and consumed for each hunting region it has hunted during that season. 
+
+When whale's decide where to go next, they evaluate the current hunting conditions where they are in comparison with all the remembered hunting regions for that season. The slide evaluation-period specifies the number of days a whale uses to determine the best place to hung. For each remembered hunting region during that season, it will look at the total time that it could spend hunting at each remembered location (taking into account travel time) and multiply that by the average  kgs/hour expected by hunting there. The metabolic cost of kgs lost is subtracted. And the optimal location is chosen. 
+
+Thus a smaller value for evaluation-period is less likely to value traveling a long distance in order to find good hunting.
+
+## HOW IT WORKS: LONG DISTANCE TRAVEL
+
+Long distance travel is computer based on a graph of approximately 1000 nodes spread over the world, and approximately 70 special nodes called anchor nodes. Each patch has information about which graph node is closest, and each graph node has information to find the shortest path along the graph to each anchor node. A path from a patch in one hunting region to a patch in another will go onto the travel graph, through an anchor node, and then reverse that process to the other patch.  The travel graph can be visualized using the map-node.  
+
+(Note:  Since all long-distance travel will move along the graph and through an anchor node, the paths followed by whales can be adjusted to give a stochastically better fit to known paths discovered from whale-tracking data.)
 
 ## THINGS TO NOTICE
 
-This section could give some ideas of things for the user to notice while running the model.
+Mortality rates, and prey population dynamics.
 
 ## THINGS TO TRY
 
-This section could give some ideas of things for the user to try to do (move sliders, switches, etc.) with the model.
+Experiment with the values of sliders and global constants. It will be important to fine-tune the factors that impact population dynamics by impacting predation success. It is not recommended that you adjust the sliders during a run. Set the sliders, watch what happens, then adjust.  
 
 ## EXTENDING THE MODEL
 
-This section could give some ideas of things to add or change in the procedures tab to make the model more complicated, detailed, accurate, etc.
+(* Future enhancements will include whale group social dynamics such as fusion and fission events. *)
 
 ## NETLOGO FEATURES
 
-This section could point out any especially interesting or unusual features of NetLogo that the model makes use of, particularly in the Procedures tab.  It might also point out places where workarounds were needed because of missing features.
 
 ## RELATED MODELS
 
-This section could give the names of models in the NetLogo Models Library or elsewhere which are of related interest.
+
 
 ## CREDITS AND REFERENCES
 
-This section could contain a reference to the model's URL on the web if it has one, as well as any other necessary credits or references.
+Matthew Dickerson and Thomas Dickerson
+Some of the long-lat coordinate transformation code written by Karly Wenz
+Non-spatial model adaptation based on code from Kenrick Mock and the paper "Agent-based Modeling of the dynamics of mammal-eating killer whales and their prey" by Testa, Mock, Taylor, Koyuk, Coyle, and Waggoner.
 @#$#@#$#@
 default
 true
