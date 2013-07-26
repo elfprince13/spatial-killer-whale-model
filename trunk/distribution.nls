@@ -35,10 +35,6 @@ globals [num-seasons
 ]
 
 patches-own [test-value]
-
-to DEBUG-MONITOR [x y]
-  if DEBUG-MONITOR-LEVEL > x [show y]
-end
   
 ; Initialize the seasonal prey distribution lists -- make data structures empty lists
 to init-distribution-structures 
@@ -121,6 +117,7 @@ to load-seasonal-distributions [seasons-file-name species species-num]
     ]
     
     let this-season-locations (list )                           ; This list contains locations just for this season.
+    let seasonal-total 0
     repeat item season num-locations [                          ; Inner loop iteratures through all the locations for this particular season for this prey-type
       ; First two values are the (lat,long) pair giving the location
       let this-location (list file-read)                        ; lat
@@ -139,16 +136,17 @@ to load-seasonal-distributions [seasons-file-name species species-num]
       let sd-offshore file-read
       set this-location (lput sd-offshore this-location)          ; sd-offshore -- distance in kms containing a standard deviation of the off-shore distributed prey
 
-      set this-average-seasonal-area this-average-seasonal-area + floor ( sd-coastal * sd-coastal * areal-scale-factor)
-      set this-average-seasonal-area this-average-seasonal-area + floor ( sd-offshore * sd-offshore * areal-scale-factor)
+      set seasonal-total seasonal-total + (floor ( sd-coastal * sd-coastal * areal-scale-factor) + floor ( sd-offshore * sd-offshore * areal-scale-factor))
+      show (WORD "Season " season ": " seasonal-total "  ( " sd-coastal " " sd-offshore " " areal-scale-factor " )")
       
       set this-season-locations (lput this-location this-season-locations)
     ]
+    set this-average-seasonal-area this-average-seasonal-area + (ln seasonal-total)
     set all-season-locations (lput this-season-locations all-season-locations)
     set season season + 1
   ]
   
-  set average-seasonal-area replace-item species-num average-seasonal-area (this-average-seasonal-area / seasons-ct)
+  set average-seasonal-area replace-item species-num average-seasonal-area (exp (this-average-seasonal-area / seasons-ct))
   
   set distributions (lput all-season-locations distributions)
  
@@ -171,11 +169,12 @@ end
 ; Reset to 0 the counts of all age classes of the given prey-type in all patches.
 ; Add to the GLOBAL-POP# field of hunting-data the total number of prey found of all age classes of the given type. 
 to gather-and-count [prey-type]
-  
-end
-
-to RUN-MONITOR [x y]
-  if RUN-MONITOR-LEVEL > x [file-show y]
+  let class-counts reduce [(map [?1 + ?2] ?1 ?2)] ([(item prey-type prey-counts)] of water)
+  let prey-list (item prey-type hunting-data)
+  set prey-list (map [replace-item GLOBAL-POP# ?1 (?2 + (item GLOBAL-POP# ?1))] prey-list class-counts)
+  let class-ct length class-counts
+  ask water [set prey-counts replace-item prey-type prey-counts n-values class-ct [0]]
+  set hunting-data replace-item prey-type hunting-data prey-list
 end
 
 ; Distribute the total number of prey of all age-classes given in the GLOBAL-POP# field of hunting-data structure according to the
@@ -218,14 +217,9 @@ to seasonal-distribution [prey-type day-of-year]
     let coastal-sd (item (len - 2) this-loc)
     let offshore-sd (item (len - 1) this-loc)
           
-    ;;;;;;;;;;;;;;;;;
-    ;; Talk to Ward about whether or not this is a reasonable thing to do!
-    ;; (or whether data should be tweaked)
-    let seed find-a-shore central-patch
-    ;if [not water?] of central-patch [
-      set central-patch item 0 seed
-    ;]
-    ;;;;;;;;;;;;;;;;;
+    if [not water?] of central-patch [
+      set central-patch item 0 find-a-shore central-patch
+    ]
     
     
     let patch-sd-list (list (coastal-sd / kmpp) (offshore-sd / kmpp))
@@ -233,6 +227,13 @@ to seasonal-distribution [prey-type day-of-year]
     
     let prey-patches [water-patches-within-to-list (map [round (? * 2.5)] patch-sd-list) coastal-filters] of central-patch
     let listed-prey-patches (item 2 prey-patches)
+    (foreach listed-prey-patches patch-sd-list[
+      if ((sum map [count ?] ?1) = 0)[
+        set patch-sd-list remove ?2 patch-sd-list
+        set p-list (list 1)
+        set listed-prey-patches remove ?1 listed-prey-patches
+      ]  
+    ])
     set prey-patches (item 0 prey-patches)
     let loc-distributions (map [segment-weighted-gaussian (round ?1) (split-distribution count-listed-patchset ?2)] patch-sd-list listed-prey-patches)
     
@@ -323,6 +324,11 @@ to-report sum-gaussian-cdf-cell [x1 x2 mn sd]
   let dx+ abs (x1 - x2)
   let dy+ abs (y1 - y2)
   report ((ifelse-value (y1 < y2) [y1][y2]) + (0.5 * dy+)) * dx+
+end
+
+
+to-report idealized-circular-density-cdf [x]
+  report 1 -  exp (- ((x ^ 2) / 2))
 end
 
 ;;  DISTRIBUTE PREY AROUND A GIVEN PATCH WITH DENSITY IN A NORMAL/GAUSSIAN DISTRIBUTION

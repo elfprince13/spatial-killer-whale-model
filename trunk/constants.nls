@@ -182,3 +182,15 @@ to init-prey-constants
   
   set K-DIST-MAX 3
 end
+
+to RUN-MONITOR [x y]
+  if RUN-MONITOR-LEVEL > x [file-show y]
+end
+
+to DEBUG-MONITOR [x y]
+  if DEBUG-MONITOR-LEVEL > x [show y]
+end
+
+to SETUP-MONITOR [x y]
+  if SETUP-MONITOR-LEVEL > x [show y]
+end

@@ -241,6 +241,11 @@ to move
    if (hours = 0) [
      ask whales [daily-step]        ; Daily metabolism -- whales digest food, thus emptying their gut.
      ; NEW PROCEDURE.  CHECKS IF THIS IS THE FIRST DAY OF A NEW SEASON FOR ANY PREY.  IF SO... gather-and-count AND redistribute
+     let distributable-prey first-day-of-season? days
+     foreach distributable-prey [
+       gather-and-count ?
+       seasonal-distribution ? days
+     ]
    ]        
 end
 
@@ -280,9 +285,7 @@ to movement-decisions
      ask group [rest]
    ][                           ; ----- Whales are not tired...
      ifelse group-hungry? [     ; If any whales (in the group) need energy, they will try to get food
-       ifelse food-present?     ; If the group is hungry, check whether there is food present on this patch
-          [hunt]                ; If there is enough food present for hunting, use statistical models for hunting success
-          [seek-food]           ; If not enough food present for hunting, move to a different patch
+       seek-food
      ][                         ; ----- Whales are not tired or hungry...
        ifelse meeting?          ; If meeting another group, then socialize, otherwise travel
           [socialize]           
@@ -669,9 +672,10 @@ to seek-food
      set current-path (list )
      move-to best-nearby
      ask other group [move-to best-nearby]  
+     hunt
   ][  
      RUN-MONITOR 1 (word " has decided to hunt in region " best-region " and is creating a path for that region.")
-     set destination [patch-here] of (one-of nodes with [anchor? and nearest-anchor = best-region])  ; ** LIST OF ANCHORS WOULD MAKE THIS MORE EFFICIENT **
+     set destination [patch-here] of (one-of nodes with [([id] of nearest-anchor) = best-region])  ; ** LIST OF ANCHORS WOULD MAKE THIS MORE EFFICIENT **
      set current-path sparse-path-to-patch destination
      travel 
    ]
@@ -840,12 +844,6 @@ end
 ; of time periods since the last rest is beyond the threshold for when they get tired.
 to-report group-tired?
    report any? group with [last-rest >= max-time-without-rest or last-rest < 0]
-end
-
-; Reporter for a given whale, determines if its currently location has enough food to justify hunting
-to-report food-present?
-   let group-size (count group)
-   report [food-rating group-size] of patch-here > MIN-HUNTING-K
 end
    
 to-report meeting?
@@ -1031,6 +1029,15 @@ end
 ; It is dependent on the values of the sliders max-time-without-rest and rest-time
 to-report max-active-ratio
   report (max-time-without-rest / (rest-time + max-time-without-rest))
+end
+
+;;;; Utility functions
+to-report zip [ziplist]
+  report reduce [(map [SENTENCE ?1 ?2] ?1 ?2)] ziplist
+end
+
+to-report flatten-once [multilist]
+  report reduce [SENTENCE ?1 ?2] multilist
 end
 
 ;to plot-masses

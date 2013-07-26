@@ -19,6 +19,9 @@ globals [
 
   best-hunting-grounds
   
+  all-seasons
+  all-season-index
+  
 ]
 
 patches-own [
@@ -41,6 +44,12 @@ to init-prey
   load-hunting-data
 end
 
+
+to-report count-prey-seasons-with-prey-type-list [prey-type]
+  report n-values (length (item prey-type seasons-data)) [prey-type]
+end
+
+
 ; This procedure reads the files containing the data needed for the hunting-data and prey-data lists that contain data about prey species
 ; and age classes
 to load-hunting-data
@@ -52,10 +61,19 @@ to load-hunting-data
   set average-seasonal-area n-values 2 [0] ; this should be equal to the number of species loaded
   
   load-data "harbor-seals.txt"
-  load-seasonal-distributions "seal-seasons.txt" "Harbor Seals" 0 
+  load-seasonal-distributions "harbor-seal-seasons.txt" "Harbor Seals" 0 
   
   load-data "ssl.txt"
   load-seasonal-distributions "ssl-seasons.txt" "Steller Sea Lions"  1 
+  
+  set all-seasons flatten-once seasons-data
+  let as-preytypes flatten-once n-values 2 [count-prey-seasons-with-prey-type-list ?1]
+  
+  set all-seasons zip (list all-seasons as-preytypes)
+  set all-seasons sort-by [((item 0 ?1) < (item 0 ?2)) or (((item 0 ?1) = (item 0 ?2)) and ((item 1 ?1) < (item 1 ?2)))] all-seasons
+  set all-seasons zip all-seasons
+  set all-season-index 0
+  
 end
 
 ; Load the hunting data file for a particular species, which includes age-class and prey data -- except for geographic season disbursal.
@@ -258,9 +276,10 @@ to-report spatial-encounter-rate [ prey-type class-type ]
   report nonspatial-encounter-rate * (item prey-type average-seasonal-area) * 0.1058955867723666
 end
 
-to-report expected-prey-encounters-by-area [patchcount prey-count prey-type class-num effective-group-size]
-  let avg-prey-encountered (spatial-encounter-rate prey-type class-num) * prey-count * (1 - hiding-effectiveness)
-  set avg-prey-encountered ifelse-value(patchcount = 0)[0][avg-prey-encountered]
+to-report expected-prey-encounters-by-area [patchcount prey-count prey-type class-num effective-group-size ph]
+  let avg-prey-encountered (spatial-encounter-rate prey-type class-num) * (prey-count) * (hiding-factor ph)
+  
+  set avg-prey-encountered ifelse-value(patchcount = 0)[0][avg-prey-encountered / patchcount]
   ; Now turn the expected number of prey encountered into an expected number killed based on vulnerability to a group this size
   let vuln (vulnerability prey-type class-num effective-group-size)  ; get the vulernability of this prey-type
   let avg-catch-size (avg-prey-encountered * vuln)
@@ -276,30 +295,7 @@ to-report expected-prey-encounters [prey-type class-num effective-group-size]
     
     let prey-count-here (item class-num (item prey-type prey-counts))         ; get the number of this prey-type present on this patch
 
-    report expected-prey-encounters-by-area 1 prey-count-here prey-type class-num effective-group-size
-end
-
-; patch reporter
-; Returns a number specifying the expected quality of hunting in this patch for a group of whales of the given size. 
-; A number > 1 justifies hunting with good probability of group success
-to-report food-rating [effective-group-size]
-   ; For each type of prey, multiple the number of prey of that type by its vulnerability, and sum over all prey types
-   let avail-qty 0
-   let prey-type 0
-   
-   ; Iterate through all prey types and add the expected catch of that type to the total expected catch
-   while [prey-type < num-prey-types][  
-     let class-num 0
-     while [class-num < (item NUM-CLASSES# (item prey-type prey-data))][                                           
-       set avail-qty (avail-qty + expected-prey-encounters prey-type class-num effective-group-size)     ; Number of prey of this type, times vulnerability
-       set prey-type (prey-type + 1)
-     ]
-   ]
-   
-   ; Scale down if prey are hiding
-   if prey-hiding > 0 [set avail-qty avail-qty * (1 - hiding-effectiveness)]       ; Lower the expected rating if prey are hiding
-
-   report avail-qty 
+    report expected-prey-encounters-by-area 1 prey-count-here prey-type class-num effective-group-size prey-hiding
 end
 
 
@@ -330,6 +326,17 @@ to-report current-prey-season [prey-type day]
   let candidates (map [dm >= (? - day1)] seasons)
   report (length seasons) - (position true reverse candidates) - 1
 end
+
+to-report first-day-of-season? [day]
+  let squeue []
+  let sdays (item 0 all-seasons)
+  let sprey (item 1 all-seasons)
+  while [day = (item all-season-index sdays)] [
+    set squeue lput (item all-season-index sprey) squeue
+    set all-season-index 1 + all-season-index
+  ]
+  report squeue
+end
   
 ; ---------------------PREY DYNAMICS  --------------
 to update-prey
@@ -338,4 +345,7 @@ to update-prey
   ]  
 end
 
+to-report hiding-factor [ph]
+  report 1 - ifelse-value (ph > 0) [hiding-effectiveness][0]
+end
 
