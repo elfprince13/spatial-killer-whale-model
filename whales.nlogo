@@ -137,7 +137,7 @@ to init-whales
   init-whale-globals                               ; Global constants having to do with whales                
   whale-genesis                                    ; Create all the initial whales at start of simulation
   create-whale-hunting-groups                      ; Create whale groups with leaders and matrilineal lines
-  initialize-random-whale-memories [ 5 ]           ; Give leaders of each group an initial artificial memory of past hunting
+  initialize-random-whale-memories 5           ; Give leaders of each group an initial artificial memory of past hunting
   
   ; Select whale groups to track with pens, based on the tracking-mode chooser.
   if tracking-mode = "all groups" [ask leaders [pen-down]]
