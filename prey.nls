@@ -16,8 +16,6 @@ globals [
   hunting-data             ; A 3D structure (list of lists)   
   prey-data                ; a 2D list holding the data specific to an entire species or distinct population
   num-prey-types           ; the number of lists in prey-data 
-
-  best-hunting-grounds
   
   all-seasons
   all-season-index
@@ -196,6 +194,49 @@ to load-class-data [name class-name]
 end
 
 ; ---------------------PREY HUNTING REPORTERS (VULNERABILITY AND ENCOUNTER RATES, ETC)   --------------
+
+
+; report the number of kgs a whale in its given group would expect to consume if it hunted for one hour at the given patch
+to-report kgs-to-be-gained-here [ effective-group-size ]
+  let all-prey get-prey-list effective-group-size
+  let total-mass-to-share 0
+  foreach all-prey [set total-mass-to-share total-mass-to-share + current-mass (first ?) (last ?)] 
+  
+  ; The following assumes the proportion of the total-mass-to-share correlates with the effective size of the individuals in the group
+  report total-mass-to-share / effective-group-size
+end
+
+
+; Reports a list of all the prey in the patch that were encountered and potentially successfully hunted.  
+; Each item in the list represents an individual prey as a pair--that is, a length two list: (prey-type, class-type).
+; Again, the list has one entry for each individual, giving the prey type and class type of that individual
+; ** This is a helper procedure for hunt
+to-report get-prey-list [effective-group-size]
+  ; FOR EACH TYPE OF PREY -- Determine the number that can be caught and potentially eaten 
+  ; show (word "is getting a prey-list for this group, of size " effective-group-size)
+  let result (list)
+  let prey-type 0
+  while [prey-type < num-prey-types][
+    let class-type 0
+    while [class-type < (item NUM-CLASSES# (item prey-type prey-data )) ] [
+      ; The patch-here evaluates the following report to return an expected number of prey killed of the given type.
+      let avg-prey-encountered (expected-prey-encounters prey-type class-type effective-group-size)    
+      
+      ; use the expected number to compute actual # encountered around a normal distribution
+      let num-can-catch random-normal avg-prey-encountered (avg-prey-encountered / 5)    
+      let frac remainder num-can-catch 1                                    ; store the fractional part
+      set num-can-catch int (num-can-catch)                                 ; get rid of fractional part
+      if (random-float 1.0) < frac [set num-can-catch (num-can-catch + 1)]  ; add one back with probability frac
+      
+      repeat num-can-catch [set result (lput (list prey-type class-type) result)]    ; Adds n individuals to the list of catchable prey where n=num-can-catch   
+      set class-type (class-type + 1)
+    ]
+    set prey-type (prey-type + 1)
+  ]
+  
+  ; randomize the all-prey list so that we take prey out in random order until whales are sated
+  report (shuffle result) 
+end
 
 ; report the vulnerability value (probability of getting killed in an encounter) for the prey-type with the given index for a group of whales of the given size
 ; prey-type is an index holding  one of harbor-seals#, harbor-seals0#, dall-porpoises#, etc. 
