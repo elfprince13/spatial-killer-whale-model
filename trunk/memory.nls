@@ -126,61 +126,47 @@ end
 ; RECOMMENT
 ; NUM-REGIONS is the average number of regions a whale should have in its memory for each season.
 to initialize-random-whale-memories [ num-regions ]
+  
   let num-hunting-regions (count nodes with [anchor?])
+  let anchor-list n-values num-hunting-regions [?]
   let season-number 0
   let prey-estimation-cache initialize-prey-estimation-cache num-hunting-regions
   let leaders-list sort leaders
   let leaders-ct count leaders
   let half-off floor (leaders-ct / 2)
   
-  let gs mean [sum [effective-size] of group] of leaders
   
   repeat number-hunting-seasons [
-     let region-no 0
-     repeat num-hunting-regions [
-       let d random-day-in-season season-number
-       let prey-type 0
-       repeat num-prey-types [
-         let rpe request-prey-estimate prey-estimation-cache prey-type d region-no gs
-         let prey-estimate (item 0 rpe)
-         set prey-estimation-cache (item 1 rpe)
-         
-         let class-counts length prey-estimate
-         let class-indices n-values class-counts [?]
-         
-         let kgs (sum (map [?1 * prey-mass-on-day prey-type ?2 d] prey-estimate class-indices)) / gs
-         
-         let cw (item (region-no mod leaders-ct) leaders-list)
-         let ocw (item ((region-no + half-off)  mod leaders-ct) leaders-list)
-         
-         ask cw [update-whale-memory season-number region-no kgs * effective-size]
-         ask ocw [update-whale-memory season-number region-no kgs * effective-size]
-         ask n-of 3 (leaders with [self != cw and self != ocw]) [update-whale-memory season-number region-no kgs * effective-size]         
-         
-         set prey-type 1 + prey-type  
-       ]
-       ;; For the given prey type pt and the given day d, compute hot-spot and expected-counts where..
-       ;; hot-spot is a patch 
-       ;; expected-counts is a list of rough estimate of how many prey of each class would end up in that patch after distribution during day d
-       ;;
-       ;; compute kg that this whale would consume if it hunted with the expected prey-counts
-       ;; add a 1-hour record for the given season, hunting-region, and estimated kg-consumed
-       
-       
-       ;;;;;;;;;;;;;;;;;;;;;;;;
-       ;
-       ; We'll do this an easy way! 
-       ; Assume that, on average, sites for distribution fall within a single hunting region
-       ; So....just add up the number of sites contained by that region!
-       ; The trick is doing that part efficiently.
-       ; One thought is to build a table before hand
-       ; Which would have to be of length = count nodes with [anchor?]
-       ; 
-       ;
-       ;;;;;;;;;;;;;;;;;;;;;;;;
-       set region-no 1 + region-no
-     ]
-     set season-number 1 + season-number 
+    let leader-no 0
+    repeat leaders-ct [
+      let region-index 0
+      let region-subset n-of num-regions anchor-list
+      let cw (item leader-no leaders-list)
+      let gs [sum [effective-size] of group] of cw
+      repeat num-regions [
+        let region-no (item region-index region-subset)
+        let d random-day-in-season season-number
+        let prey-type 0
+        let kgs 0
+        repeat num-prey-types [
+          let rpe request-prey-estimate prey-estimation-cache prey-type d region-no gs
+          let prey-estimate (item 0 rpe)
+          set prey-estimation-cache (item 1 rpe)
+          
+          let class-counts length prey-estimate
+          let class-indices n-values class-counts [?]
+          
+          set kgs kgs + ((sum (map [?1 * prey-mass-on-day prey-type ?2 d] prey-estimate class-indices)) / gs)
+          
+          
+          set prey-type 1 + prey-type  
+        ]
+        ask cw [update-whale-memory season-number region-no kgs * effective-size]         
+        set region-index 1 + region-index
+      ]
+      set leader-no 1 + leader-no 
+    ]
+    set season-number 1 + season-number 
   ]
 end
 
