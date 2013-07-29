@@ -115,10 +115,8 @@ to setup
   init-prey  
   init-whales
    
-  let file-name (word "Testrun-" (substring date-and-time 16 27) "-" (substring date-and-time 0 8))
-  file-open file-name
-  RUN-MONITOR 0 (word "Whale test run on " date-and-time " with " INITIAL-NUMBER-WHALES " whales.") 
-
+  INIT-RUN-MONITOR
+  
   ask water [set visited? -1]    ;; **** COMMENT HERE... AND ON THE USE OF VISITED... AND REVISIT WATER-PATCHES-WITHIN in MAP ********
   
   reset-ticks
@@ -246,6 +244,7 @@ to move
      let distributable-prey first-day-of-season? days
      foreach distributable-prey [
        gather-and-count ?
+       RUN-MONITOR 1 (word "Seasonal distribution for " (item NAME# (item ? prey-data)) " on day " days)
        seasonal-distribution ? days
      ]
    ]        

@@ -42,6 +42,17 @@ to init-prey
   ]
   init-prey-constants
   load-hunting-data
+  
+  ; Distributing inital prey!
+  SETUP-MONITOR 0 "Distributing initial prey"
+  color-hunting-regions-dark
+  let day0-seasons first-day-of-season? days ; ignore this result, since we'll initialize ALL prey seasons, but advance the internal counter
+  let season-indices n-values num-prey-types [?]
+  foreach season-indices [ seasonal-distribution ? days ]
+  
+  let maxpreycount max [sum flatten-once prey-counts] of water
+  ask water [set pcolor hunting-region-color - 7.5 + (9.9 / (log maxpreycount 10)) * (log (1 + (sum flatten-once prey-counts)) 10)]
+
 end
 
 
@@ -206,7 +217,7 @@ end
 to-report spatial-encounter-rate [ prey-type class-type ]
   ; The encounter rate as used in formulas must have the following units (where er is the encounter rate):
   ;
-  ; er ∝ (1 / hunting-groups) (1 / days)
+  ; er ∝ (1 / hunting-groups) (1 / hunting-time)
   ; 
   ; Which is to say,
   ; (#Prey Encountered by n Hunting Groups on m Days) = n * m * (prey-total) * er 
@@ -268,12 +279,13 @@ to-report spatial-encounter-rate [ prey-type class-type ]
   ;   Absorbing the factor of prey-total cancels out a calculation, and factoring out prey-density(x,y) allows
   ;   the result of this function to be reused for all matching values of class-type and prey-type 
   ;   (and improves modularity by reducing the arguments that must be passed around).
-  ;   Finally, we convert the (1 / days) dependence to (1 / hours) by straightforward division by 24
+  ;   Finally, we convert the (1 / hunting-time) dependence to (1 / hours) by straightforward division by 24 * (max-active-ratio / 2)
+  ;   which is the maximum amount of time that a whale might hunt in a single day
   ;
   ; We'll call this new function fbar:
-  ; fbar(er) = er * area-total_ns / (24 * (1 - 1/sqrt(e))) = er / (24 * 0.39346934) = er * area-total_ns * 0.1058955867723666
+  ; fbar(er) = er * area-total_ns / (24 * (max-active-ratio / 2) * (1 - 1/sqrt(e))) = er / (12 * 0.39346934 * max-active-ratio) = er * area-total_ns * 0.2117911735447332 / max-active-ratio
   let nonspatial-encounter-rate encounter-rate prey-type class-type
-  report nonspatial-encounter-rate * (item prey-type average-seasonal-area) * 0.1058955867723666
+  report nonspatial-encounter-rate * (item prey-type average-seasonal-area) * 0.2117911735447332 / max-active-ratio
 end
 
 to-report expected-prey-encounters-by-area [patchcount prey-count prey-type class-num effective-group-size ph]

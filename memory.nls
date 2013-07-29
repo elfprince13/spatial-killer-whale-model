@@ -123,50 +123,60 @@ to-report request-prey-estimate [cache prey-type day hunting-region-no effective
   report (list prey-estimate cache)
 end
 
-; RECOMMENT
-; NUM-REGIONS is the average number of regions a whale should have in its memory for each season.
+; NUM-REGIONS is the number of regions a whale should have in its memory for each season.
 to initialize-random-whale-memories [ num-regions ]
   
+  ; we don't store this anywhere, so compute it for the routine
   let num-hunting-regions (count nodes with [anchor?])
+  ; assumes that the hunting regions are numbered sequentially: 0->(num-hunting-regions - 1)
+  ; lots of stuff depends on this, but should be valid, because nodes with [anchor?] are created before other nodes.
   let anchor-list n-values num-hunting-regions [?]
-  let season-number 0
+  
+  ; cache our calculations, which may not happen in a sane order, 
+  ; because of random region selection
   let prey-estimation-cache initialize-prey-estimation-cache num-hunting-regions
   let leaders-list sort leaders
   let leaders-ct count leaders
-  let half-off floor (leaders-ct / 2)
   
-  
-  repeat number-hunting-seasons [
-    let leader-no 0
-    repeat leaders-ct [
+  ask leaders [
+    ; calculate effective group size.
+    let gs sum [effective-size] of group
+    
+    ; in each season, this leader will estimate the number of prey it might find
+    ; in num-regions randomly selected hunting-regions
+    let season-number 0
+    repeat number-hunting-seasons [
       let region-index 0
       let region-subset n-of num-regions anchor-list
-      let cw (item leader-no leaders-list)
-      let gs [sum [effective-size] of group] of cw
+      
       repeat num-regions [
         let region-no (item region-index region-subset)
         let d random-day-in-season season-number
         let prey-type 0
+        
+        ; sum up our kgs before updating memory, because we only want to hunt for 1 hour total
         let kgs 0
         repeat num-prey-types [
           let rpe request-prey-estimate prey-estimation-cache prey-type d region-no gs
           let prey-estimate (item 0 rpe)
+          
+          ; update cache
           set prey-estimation-cache (item 1 rpe)
           
           let class-counts length prey-estimate
           let class-indices n-values class-counts [?]
           
+          ; add in new kg estimate based on time of year and prey-type + prey-class
           set kgs kgs + ((sum (map [?1 * prey-mass-on-day prey-type ?2 d] prey-estimate class-indices)) / gs)
           
           
           set prey-type 1 + prey-type  
         ]
-        ask cw [update-whale-memory season-number region-no kgs * effective-size]         
+        update-whale-memory season-number region-no kgs * effective-size        
         set region-index 1 + region-index
       ]
-      set leader-no 1 + leader-no 
+      set season-number 1 + season-number 
     ]
-    set season-number 1 + season-number 
   ]
 end
 
