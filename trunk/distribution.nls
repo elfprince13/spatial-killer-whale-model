@@ -186,7 +186,6 @@ to seasonal-distribution [prey-type day-of-year]
   ask water [set visited? -1] ; this should be done in the calling function instead, when done with debugging
   
   DEBUG-MONITOR 0 (word "Seasonal distribution for prey-type " prey-type ", " (item NAME# (item prey-type prey-data)) " on season including day " day-of-year) 
-  RUN-MONITOR 1 (word "Seasonal distribution for " (item NAME# (item prey-type prey-data)) " on day " day-of-year)
   
   ; Find the number of the season corresponding to the given day.
   let season-index get-season-from-day prey-type day-of-year

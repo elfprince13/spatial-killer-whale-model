@@ -183,6 +183,12 @@ to init-prey-constants
   set K-DIST-MAX 3
 end
 
+to INIT-RUN-MONITOR
+  let file-name (word "Testrun-" (substring date-and-time 16 27) "-" (substring date-and-time 0 8))
+  file-open file-name
+  RUN-MONITOR 0 (word "Whale test run on " date-and-time " with " INITIAL-NUMBER-WHALES " whales.") 
+end
+
 to RUN-MONITOR [x y]
   if RUN-MONITOR-LEVEL > x [file-show y]
 end
