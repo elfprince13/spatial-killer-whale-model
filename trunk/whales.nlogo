@@ -77,6 +77,8 @@ globals [
   whales-died-at-birth
   whales-starved
   other-deaths
+  
+  hunting-region-sets           ; A list of patch-sets corresponding to each hunting region, indexed by hunting region.
 ]
 
 ; ---------------------INITIALIZATION PROCEDURES--------------
@@ -110,6 +112,7 @@ to setup
   compute-vd                ; Identify islands. For each water patch, compute the nearest land patch -- this implicitly gives the Voronoi diagram.
   make-graph                ; Create a graph of nodes (including special anchor nodes) to be used for long distance whale movement
   all-anchors-SSSP          ; Compute the shortest path from all graph nodes to all anchor nodes, and store the shortest-path info in the nodes. 
+  make-hunting-region-sets
 
   ; Load data from data files for the prey and the whales
   init-prey  
@@ -285,7 +288,7 @@ to movement-decisions
    ifelse group-tired? [        ; Fatigue takes first precedent in decision making
      ask group [rest]
    ][                           ; ----- Whales are not tired...
-     ifelse group-hungry? [     ; If any whales (in the group) need energy, they will try to get food
+     ifelse group-hungry? [     ; If any whales (in the group) need energy, they will try to get food       
        seek-food
      ][                         ; ----- Whales are not tired or hungry...
        ifelse meeting?          ; If meeting another group, then socialize, otherwise travel
@@ -494,49 +497,6 @@ to hunt
   ask water in-radius hiding-radius [set prey-hiding hiding-time]
 end
 
-; report the number of kgs a whale in its given group would expect to consume if it hunted for one hour at the given patch
-to-report kgs-to-be-gained-here [ effective-group-size ]
-  let all-prey get-prey-list effective-group-size
-  let total-mass-to-share 0
-  foreach all-prey [set total-mass-to-share total-mass-to-share + current-mass (first ?) (last ?)] 
-  
-  ; The following assumes the proportion of the total-mass-to-share correlates with the effective size of the individuals in the group
-  report total-mass-to-share / effective-group-size
-end
-
-
-; CONTEXT: One whale (should be a group leader)
-; Reports a list of all the prey in the patch that were encountered and potentially successfully hunted.  
-; Each item in the list represents an individual prey as a pair--that is, a length two list: (prey-type, class-type).
-; Again, the list has one entry for each individual, giving the prey type and class type of that individual
-; ** This is a helper procedure for hunt
-to-report get-prey-list [effective-group-size]
-  ; FOR EACH TYPE OF PREY -- Determine the number that can be caught and potentially eaten 
-  ; show (word "is getting a prey-list for this group, of size " effective-group-size)
-  let result (list)
-  let prey-type 0
-  while [prey-type < num-prey-types][
-    let class-type 0
-    while [class-type < (item NUM-CLASSES# (item prey-type prey-data )) ] [
-      ; The patch-here evaluates the following report to return an expected number of prey killed of the given type.
-      let avg-prey-encountered (expected-prey-encounters prey-type class-type effective-group-size)    
-      
-      ; use the expected number to compute actual # encountered around a normal distribution
-      let num-can-catch random-normal avg-prey-encountered (avg-prey-encountered / 5)    
-      let frac remainder num-can-catch 1                                    ; store the fractional part
-      set num-can-catch int (num-can-catch)                                 ; get rid of fractional part
-      if (random-float 1.0) < frac [set num-can-catch (num-can-catch + 1)]  ; add one back with probability frac
-      
-      repeat num-can-catch [set result (lput (list prey-type class-type) result)]    ; Adds n individuals to the list of catchable prey where n=num-can-catch   
-      set class-type (class-type + 1)
-    ]
-    set prey-type (prey-type + 1)
-  ]
-  
-  ; randomize the all-prey list so that we take prey out in random order until whales are sated
-  report (shuffle result) 
-end
-
 
 
 ; CONTEXT: One whale (should be a group leader)
@@ -599,13 +559,26 @@ end
 
 ; ====================== END OF EATING AND HUNTING ==============
 
-
+; ================= MEMORY-AND-LOCAL-KNOWLEDGE-BASED-DECISION-MAKING ====================
 ; CONTEXT: One whale (should be a group leader)
 ; Strategies (local optimization and past memory) to locate food
-; This procedure assumes that the whales will move, and will not be hunting in the current patch
 ; A whale will choose either to hunt in its current region, or to start traveling to another region.
+; seek-food will call either find-new-destination or toward-destination, and in either case it will end by hunting, moving, or both (if the distance is small)
+
+; The first procedure, seek-food, simply askes whether or not a whale already has a destination.
+; If a whale already has a destination, then the only quesiton is whether it has found enough local food to stop and hunt, or should continue.
+; If a whale does not already have a destination, then it will search its memory.
 to seek-food
-  RUN-MONITOR 1  " is seeking food and decided where to travel"
+  RUN-MONITOR 1  "called seek-food. Is seeking food and deciding where to travel"
+;  ifelse destination = nobody [
+    find-new-destination
+;  ][
+;    toward-destination
+;  ]
+end
+
+to find-new-destination
+  RUN-MONITOR 1  "called find-new-destination. Is seeking food and deciding where to travel"
   let the-season hunting-season-of-day days                                    ; Get the current season number for accessing seasonal memory structure
   let travel-radius (whale-speed / kmpp)                                       ; Distance in patches a whale can travel in one hour
   let group-size (sum [effective-size] of group)                               ; The whale's group size, used to determine both hunting success and amount of sharing
@@ -677,9 +650,9 @@ to seek-food
      if [visited?] of best-nearby < travel-radius / 2 [hunt]   ;  **** If travel time less than 1/2 hour, then travel and hunt in the same turn. MODIFY *****
   ][  
      RUN-MONITOR 1 (word " has decided to hunt in region " best-region " and is creating a path for that region.")
-     set destination [patch-here] of (one-of nodes with [([id] of nearest-anchor) = best-region])  ; ** LIST OF ANCHORS WOULD MAKE THIS MORE EFFICIENT **
+     set destination max-one-of item best-region hunting-region-sets [kgs-to-be-gained-here group-size]  
      set current-path sparse-path-to-patch destination
-     travel 
+     toward-destination 
    ]
    ask nearby [set visited? -1]           ; ******* PART OF THE USE OF visited? NEEDING COMMENTING **********
 end
@@ -708,10 +681,6 @@ to travel
    toward-destination
 end
 
-;to choose-destination
-;    set destination one-of best-hunting-grounds      ; The whale's current destination -- initially any of the best hunting grounds.
-;end
-
 ; Follow the path of patches stored in current-path for whatever distance a whale can travel in one time step.
 ; Assumes that current-path is not empty, and that it starts with the whale's current patch or an adjacent patch.
 to toward-destination
@@ -734,7 +703,7 @@ to toward-destination
    
    if patch-here = destination [
      RUN-MONITOR 1 (word " reached destination " destination)
-     set current-path nobody 
+     set current-path (list ) 
      set destination nobody
    ]
    

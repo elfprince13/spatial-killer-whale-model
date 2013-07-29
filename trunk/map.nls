@@ -968,108 +968,14 @@ to-report sparse-path-from-node-to-anchor [n anc]
   report path
 end
 
-;
-;; Creates a path (list of patches) from patch p1 to p2. 
-;; It is NOT necessarily the minimum length path.
-;; The path goes from patch p1 onto the node graph, follows a shortest path on the graph to an anchor, and then reverses that process to get to patch p2.
-;; The starting patch and the final patch are included. 
-;to-report path-from-patch-to-patch [p1 p2]
-;  ; For the starting and ending patches, find the nearest node on the travel graph
-;  let n1 [nearest-node] of p1
-;  let n2 [nearest-node] of p2
-;
-;  ; The path will have three parts: p1 -> n1  followed by n1 -> n2 followed by n2 -> p2. 
-;  ; Start with the path p1 -> n1
-;  let path path-to-nearest-node p1
-;  
-;  ; Compute the path from n1 to n2, and append.
-;  let temp-path path-from-node-to-node n1 n2
-;  set path merge-path path temp-path
-;  
-;  ; Compute the path from n2 to p2 and append it
-;  set temp-path path-from-nearest-node p2
-;  set path merge-path path temp-path
-;  
-;  report path
-;end
-;
-;; Finds and reports the path of patches from patch p to its nearest node on the travel graph. 
-;; The starting patch and the final patch are included. 
-;to-report path-to-nearest-node [p]
-;   let result (list p)                 ; initialize the path to contain just the starting patch
-;   let n [nearest-node] of p           ; n is the nearest node to patch p
-;   while [p != [patch-here] of n][     ; the path is done when it reaches the patch the node n is on
-;     set p [to-node] of p              ; If the path is not done, get the next node on the path from p to n...
-;     set result lput p result          ; ... and add it to the end of the list.
-;   ]
-;   report result
-;end
-;
-;
-;; This procedure should report the reverse of the above procedure: path-to-nearest-node.
-;; That is, it reports a path to patch p from its nearest node.
-;; It should be more efficient to compute it directly than to compute the path to the node and then reverse it.
-;; It is computer in the same way as path-to-nearest-node except new patches are added to the front, not the end, of the list.
-;to-report path-from-nearest-node [p]
-;   let result (list p)                  ; Add each patch on the path to a new list, in reverse order.
-;   let n [nearest-node] of p
-;   while [p != [patch-here] of n][
-;     set p [to-node] of p
-;     set result fput p result
-;   ]                                
-;   report result
-;end
-;
-;; Reports the path of patches from node n1 to node n2 following the shortest path info on the graph.
-;; This is done by following the path from n1 to the nearest anchor to n2, and then appending the reverse of the
-;; path from n2 to its nearest anchor.  
-;; Note that this is not necessarily the shortest path from n1 to n2. For example, path may reach the anchor and then backtrack.
-;to-report path-from-node-to-node [n1 n2]
-;  let anc [nearest-anchor] of n2                  ; the nearest anchor of n2
-;  let path1 path-from-node-to-anchor n1 anc       ; Get the path from n1 to anc
-;  let path2 path-from-node-to-anchor n2 anc       ; The reverse of the path from anc to n2
-;  
-;  ; check if path2 backtracks on the end of path1, and if so remove that extra part
-;  while [length path1 > 1 and length path2 > 1 and second-to-last path1 = second-to-last path2][
-;    set path1 butlast path1
-;    set path2 butlast path2
-;  ]
-;  
-;  report merge-path path1 (reverse path2)         ; The final result
-;end
-;
-;; Reports the path of patches from node n1 to anchor node anc following the shortest path info on the graph.
-;; The patches of both n and anc are  included in the path.
-;to-report path-from-node-to-anchor [n anc]
-;  let index [id] of anc                             ; The index of anc determines where in the nextlist of nodes the shortest path to anc is stored.
-;  let path (list [patch-here] of n)                   ; create an empty path of patches
-;  while [n != anc] [                                ; for each edge (n,nn) in the shorest path on the graph, find the corresponding path of patches and append to path.
-;    let nn (item index ([nextlist] of n))
-;    let partial (find-line ([xcor] of n) ([ycor] of n) ([xcor] of nn) ([ycor] of nn))
-;    set path (merge-path path partial)
-;    set n nn
-;  ]
-;  report path
-;end
-;
-;; Append a list of patches p2 to the end of the list p1.  
-;; The first node of p2 should be the same as the last node of p1.  This duplicate is removed.
-;; Any other backtracking part of the path is removed.
-;to-report merge-path [p1 p2]
-;   ifelse last p1 != first p2 [ 
-;     DEBUG-MONITOR 1 "ERROR: merging paths that do not overlap" 
-;   ][
-;     set p2 butfirst p2
-;   ]
-;   
-;   ; check if the start of path 2 backtracks along the end of path 1, and if so remove overlap
-;   while [length p1 > 1 and length p2 > 0 and second-to-last p1 = first p2][
-;      set p1 butlast p1
-;      set p2 butfirst p2
-;   ]
-;   
-;   report sentence p1 p2
-;end
+to make-hunting-region-sets
+  set hunting-region-sets (list )
+  let hr 0
+  repeat (count nodes with [anchor?])[
+     set hunting-region-sets lput (water with [hunting-region = hr] ) hunting-region-sets
+     set hr (hr + 1) 
+  ]
+end
 
 ; report the second to last item in patch list pl. Assume the last has length > 1
 to-report second-to-last [pl]
