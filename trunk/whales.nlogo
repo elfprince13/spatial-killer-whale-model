@@ -11,6 +11,7 @@
 
 ; This file (whale.nlogo) includes model controls plus whale behavior.
 
+extensions [profiler]
 __includes ["map.nls" "prey.nls" "constants.nls" "distribution.nls" "geometry.nls" "memory.nls"]
 ; ------- ADDITIONAL FILES ----------
 ;     map.nls includes procedures and declarations for spatial information.
@@ -1011,6 +1012,28 @@ end
 
 to-report flatten-once [multilist]
   report reduce [SENTENCE ?1 ?2] multilist
+end
+
+to profile-setup
+  profiler:start setup profiler:stop print profiler:report profiler:reset
+end
+
+to profile-run [day-count]
+  let hour-count 24 * day-count
+  profiler:start repeat hour-count [ move ] profiler:stop print profiler:report profiler:reset
+end
+
+to benchmark-radius [radius]
+reset-timer
+repeat 10 [
+__ignore [count patches in-radius radius] of patch 294 133
+]
+print timer
+reset-timer
+repeat 10 [
+__ignore [count patches with [distance myself <= radius]] of patch 294 133
+]
+print timer
 end
 
 ;to plot-masses

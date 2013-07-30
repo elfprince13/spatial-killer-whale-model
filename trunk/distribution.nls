@@ -348,7 +348,8 @@ to distribute-prey-about-patch [prey-type class-type prey-count central-patch pr
   let prey-remaining prey-count
   ; Can't nest reporter-tasks, so foreach is out :(
   
-  DEBUG-MONITOR 3 (WORD "Distributing prey about patch " central-patch)
+  
+  DEBUG-MONITOR 2 (WORD "Distributing prey about patch " central-patch)
   
   repeat num-patch-types [
     
@@ -360,10 +361,11 @@ to distribute-prey-about-patch [prey-type class-type prey-count central-patch pr
       let cur-distribution item patch-type-counter distribution-cells
       set cur-distribution (distribute-discrete pc cur-distribution) 
       set cur-distribution fold-distribution cur-distribution (floor ((length cur-distribution) / 2))
+      
+      let p-buffer filter [count ? > 0] (sublist cur-patchsets (length cur-distribution) (length cur-patchsets))
       set cur-patchsets sublist cur-patchsets 0 length cur-distribution
       
       let dist-buffer []
-      let p-buffer []
             
       (foreach cur-distribution cur-patchsets [
         let near-patches count ?2
@@ -372,8 +374,10 @@ to distribute-prey-about-patch [prey-type class-type prey-count central-patch pr
           set p-buffer lput ?2 p-buffer
           distribute-n-over-m-patches prey-type class-type ?1 ?2
         ][
-          if (?1 > 0)[ set dist-buffer lput ?1 dist-buffer]
-          DEBUG-MONITOR 1 (WORD "no patches at distance for patchset " ?2 " (missing " ?1 " prey)")
+          if (?1 > 0)[
+            set dist-buffer lput ?1 dist-buffer
+            DEBUG-MONITOR 3 (WORD "no patches at distance for patchset " ?2 " (missing " ?1 " prey)")
+          ]
         ]
       ])
       
@@ -393,8 +397,12 @@ to distribute-prey-about-patch [prey-type class-type prey-count central-patch pr
           distribute-n-over-m-patches prey-type class-type ?1 ?2
         ])
       ][
-        ifelse (db-count > 0) [ DEBUG-MONITOR 1 " O_o no patches were ever found!"]
-        [ DEBUG-MONITOR 2 "no corrections necessary" ]
+        let total-remaining sum dist-buffer
+        ifelse (total-remaining > 0) [ DEBUG-MONITOR 1 (WORD "O_o no patches were ever found! Lost " total-remaining " trying to distribute about " central-patch " with patch-type-counter " patch-type-counter)
+          DEBUG-MONITOR 1 (WORD "  on inputs: " pc cur-patchsets cur-distribution)
+          DEBUG-MONITOR 1 (WORD "  derived from: " prey-count distribution-patchsets distribution-cells)
+          DEBUG-MONITOR 1 (WORD "  and p-buffer, dist-buffer:" p-buffer dist-buffer)]
+        [ DEBUG-MONITOR 3 "no corrections necessary" ]
       ]
       
     ]

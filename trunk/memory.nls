@@ -127,7 +127,7 @@ end
 to initialize-random-whale-memories [ num-regions ]
   
   ; we don't store this anywhere, so compute it for the routine
-  let num-hunting-regions (count nodes with [anchor?])
+  let num-hunting-regions length hunting-region-sets
   ; assumes that the hunting regions are numbered sequentially: 0->(num-hunting-regions - 1)
   ; lots of stuff depends on this, but should be valid, because nodes with [anchor?] are created before other nodes.
   let anchor-list n-values num-hunting-regions [?]
