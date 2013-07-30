@@ -969,12 +969,8 @@ to-report sparse-path-from-node-to-anchor [n anc]
 end
 
 to make-hunting-region-sets
-  set hunting-region-sets (list )
-  let hr 0
-  repeat (count nodes with [anchor?])[
-     set hunting-region-sets lput (water with [hunting-region = hr] ) hunting-region-sets
-     set hr (hr + 1) 
-  ]
+  SETUP-MONITOR 1 "Making hunting region sets based on anchor nodes"
+  set hunting-region-sets n-values (count nodes with [anchor?]) [water with [hunting-region = ?]]
 end
 
 ; report the second to last item in patch list pl. Assume the last has length > 1

@@ -393,8 +393,8 @@ end
   
 ; ---------------------PREY DYNAMICS  --------------
 to update-prey
-  ask patches [                   ; One fewer time steps until prey come out of hiding.
-    if prey-hiding > 0 [set prey-hiding (prey-hiding - 1)]
+  ask water with [prey-hiding > 0] [                   ; One fewer time steps until prey come out of hiding.
+    set prey-hiding (prey-hiding - 1)
   ]  
 end
 
