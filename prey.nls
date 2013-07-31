@@ -197,13 +197,13 @@ end
 
 
 ; report the number of kgs a whale in its given group would expect to consume if it hunted for one hour at the given patch
-to-report kgs-to-be-gained-here [ effective-group-size ]
-  let all-prey get-prey-list effective-group-size
+to-report kgs-to-be-gained-here [ egs ]
+  let all-prey get-prey-list egs
   let total-mass-to-share 0
   foreach all-prey [set total-mass-to-share total-mass-to-share + current-mass (first ?) (last ?)] 
   
   ; The following assumes the proportion of the total-mass-to-share correlates with the effective size of the individuals in the group
-  report total-mass-to-share / effective-group-size
+  report total-mass-to-share / egs
 end
 
 
@@ -211,16 +211,16 @@ end
 ; Each item in the list represents an individual prey as a pair--that is, a length two list: (prey-type, class-type).
 ; Again, the list has one entry for each individual, giving the prey type and class type of that individual
 ; ** This is a helper procedure for hunt
-to-report get-prey-list [effective-group-size]
+to-report get-prey-list [egs]
   ; FOR EACH TYPE OF PREY -- Determine the number that can be caught and potentially eaten 
-  ; show (word "is getting a prey-list for this group, of size " effective-group-size)
+  ; show (word "is getting a prey-list for this group, of size " egs)
   let result (list)
   let prey-type 0
   while [prey-type < num-prey-types][
     let class-type 0
     while [class-type < (item NUM-CLASSES# (item prey-type prey-data )) ] [
       ; The patch-here evaluates the following report to return an expected number of prey killed of the given type.
-      let avg-prey-encountered (expected-prey-encounters prey-type class-type effective-group-size)    
+      let avg-prey-encountered (expected-prey-encounters prey-type class-type egs)    
       
       ; use the expected number to compute actual # encountered around a normal distribution
       let num-can-catch random-normal avg-prey-encountered (avg-prey-encountered / 5)    
@@ -329,12 +329,12 @@ to-report spatial-encounter-rate [ prey-type class-type ]
   report nonspatial-encounter-rate * (item prey-type average-seasonal-area) * 0.2117911735447332 / max-active-ratio
 end
 
-to-report expected-prey-encounters-by-area [patchcount prey-count prey-type class-num effective-group-size ph]
+to-report expected-prey-encounters-by-area [patchcount prey-count prey-type class-num egs ph]
   let avg-prey-encountered (spatial-encounter-rate prey-type class-num) * (prey-count) * (hiding-factor ph)
   
   set avg-prey-encountered ifelse-value(patchcount = 0)[0][avg-prey-encountered / patchcount]
   ; Now turn the expected number of prey encountered into an expected number killed based on vulnerability to a group this size
-  let vuln (vulnerability prey-type class-num effective-group-size)  ; get the vulernability of this prey-type
+  let vuln (vulnerability prey-type class-num egs)  ; get the vulernability of this prey-type
   let avg-catch-size (avg-prey-encountered * vuln)
   
   report avg-catch-size
@@ -344,11 +344,11 @@ end
 ; CONTEXT:  ONE PATCH
 ; Report the expected number of successful prey encounters (prey encountered and successfully hunted) for one prey of the given type and a group of the given size
 ; This takes into account the encounter-rate and vulnerability of the given prey-type as well as spatial disbursement
-to-report expected-prey-encounters [prey-type class-num effective-group-size]
+to-report expected-prey-encounters [prey-type class-num egs]
     
     let prey-count-here (item class-num (item prey-type prey-counts))         ; get the number of this prey-type present on this patch
 
-    report expected-prey-encounters-by-area 1 prey-count-here prey-type class-num effective-group-size prey-hiding
+    report expected-prey-encounters-by-area 1 prey-count-here prey-type class-num egs prey-hiding
 end
 
 
