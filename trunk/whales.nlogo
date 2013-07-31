@@ -44,6 +44,7 @@ whales-own [
   mother-id                        ; unique ID of this whale's mother, used for matrilineal lines
   is-leader?                       ; set to true if this whale is a group leader
   group                            ; a list of whales in this whale's current group -- only used if is-leader is true.
+  effective-group-size             ; sum [effective-size] of group
   leader                           ; the whale who leads this group -- only used if is-leader? is false.
   ; whales-met                       ; *** FOR FUTRE *** a list of whales with which this whale has associated
 
@@ -155,6 +156,7 @@ to whale-genesis
   create-whales INITIAL-NUMBER-WHALES [
     ; set whales-met (list )
     set group nobody
+    set effective-group-size 0
     set is-leader? false
     set size 8.0                ; the size is for visibility
     
@@ -203,7 +205,6 @@ to create-whale-hunting-groups
   ]
   ask whales with [not is-leader?] [join-random-group]                ; put all whales in some group
   balance-groups                                                      ; there should be variance among group sizes, but don't allow groups of just 1 adult
-  set leaders whales with [is-leader?]                                ; Create a list of group leaders for later efficiency
 end
 
 ; ----------------------------------------
@@ -219,10 +220,12 @@ end
 ; CONTEXT:  observer
 ; Make sure that all groups have at least 2 adults
 to balance-groups
-  ; find leaderes if groups with only 1 adult whale
+  ; find leaders if groups with only 1 adult whale
   ask whales with [is-leader? and count group with [age-years >= 10] < 2][
      disband-group
   ]
+  set leaders whales with [is-leader?]                                ; Create a list of group leaders for later efficiency
+  ask leaders [set effective-group-size get-effective-group-size]
 end
 
 ; CONTEXT:  Whale group leader
@@ -231,6 +234,7 @@ to disband-group
   set is-leader? false
   ask group [join-random-group]
   set group nobody
+  set effective-group-size 0
 end
 ;==================================================
 ; ---------------------ONE TICK -------------------
@@ -318,25 +322,28 @@ end
 to move-toward-new-destination
   let the-season hunting-season-of-day days                            ; Get the current season number for accessing seasonal memory structure
   let travel-radius (whale-speed / kmpp)                               ; Distance in patches a whale can travel in one hour
-  let effective-group-size (sum [effective-size] of group)             ; The whale's group size, used to determine both hunting success and amount of sharing
-
+  
   ; find best patch for hunting locally
   let nearby water-patches-within travel-radius 0
-  let best-nearby max-one-of nearby [kgs-to-be-gained-here effective-group-size]       ; patch in that radius with the most currently avaialable food
+  let egs effective-group-size
+  let best-nearby max-one-of nearby [kgs-to-be-gained-here egs]       ; patch in that radius with the most currently avaialable food
   let best-local-gain expected-weight-gain-in-n-days-at evaluation-period best-nearby
   
-   ; find best hunting region in memory for hunting right now
-  let expected-gain-list map [expected-weight-gain-in-n-days-based-on-memory evaluation-period ?] (item the-season memory)
-  let i index-of-max expected-gain-list
+  let season-memory item the-season memory
+  
+  ; find best hunting region in memory for hunting right now
+  ; reduced degree of indirection
+  let expected-gain-list map [(list (expected-weight-gain-in-n-days-based-on-memory evaluation-period ?) ?)] season-memory
+  let best-remote-gain reduce [ifelse-value ((first ?1) > (first ?2)) [?1][?2]] expected-gain-list
 
-  ifelse item i expected-gain-list > best-local-gain [
-    let best-region region-of (item i (item the-season memory))
+  ifelse (first best-remote-gain) > best-local-gain [
+    let best-region region-of (last best-remote-gain)
     ; Consider the best five places to hunt in the chosen region, and random select one of those five as a destination.
-    set destination one-of max-n-of 5 (item best-region hunting-region-sets) [kgs-to-be-gained-here effective-group-size]  
+    set destination one-of max-n-of 5 (item best-region hunting-region-sets) [kgs-to-be-gained-here egs]  
     RUN-MONITOR 2 (word " has decided to hunt in region " best-region " and is creating a path for patch " destination)
     set current-path sparse-path-to-patch destination
     continue-on-path
-    ][
+  ][
      RUN-MONITOR 2 (" has decided to hunt local food and is clearing path.")
      set destination nobody
      set current-path (list )
@@ -348,25 +355,14 @@ to move-toward-new-destination
   ask nearby [set visited? -1]
 end
 
-; Report the index of the maximum item in this list of numbers
-to-report index-of-max [ l ]
-   let best 0
-   let i 1
-   while [i < length l][
-     if item i l > item best l [set best i]
-     set i i + 1
-   ]
-   report best
-end
-
 to move-with-current-destination
     RUN-MONITOR 2 (word " has a destination " destination " and is evaluating local hunting to decide whether to continue.")
-    let effective-group-size (sum [effective-size] of group)             ; The whale's group size, used to determine both hunting success and amount of sharing
     
     ; find best patch for hunting locally
     let travel-radius (whale-speed / kmpp)                                       ; Distance in patches a whale can travel in one hour
     let nearby water-patches-within travel-radius 0
-    let best-nearby max-one-of nearby [kgs-to-be-gained-here effective-group-size]     ; patch in that radius with the most food
+    let egs effective-group-size
+    let best-nearby max-one-of nearby [kgs-to-be-gained-here egs]     ; patch in that radius with the most food
     let best-local-gain expected-weight-gain-in-n-days-at evaluation-period best-nearby
   
    ifelse best-local-gain > 0 [
@@ -396,8 +392,8 @@ end
 ; Travel is assumed to be local. The whale estimates that  1/2 of its non-resting hours will be spent 
 ; actually hunting and the rest will be spent moving about locally. 
 to-report expected-weight-gain-in-n-days-at [num-days p]
-  let effective-group-size (sum [effective-size] of group)              ; The whale's group size, used to determine both hunting success and amount of sharing
-  let hourly-gain [kgs-to-be-gained-here effective-group-size] of p     ; hourly kgs expectation to be gained nearby
+  let egs effective-group-size
+  let hourly-gain [kgs-to-be-gained-here egs] of p     ; hourly kgs expectation to be gained nearby
   let waking-hours (max-active-ratio * num-days * 24)                   ; total number of hours a whale is active (not resting) over the given number of days
   let max-hunting-hours (waking-hours * 0.5)                            ; *** Since hunting causes prey to hide, whales spent 50% of their time moving around locally, and 50% hunting        
   let kgs-gained (hourly-gain * max-hunting-hours)                      ; with the given number of hours to hunt, how many kgs of food will it get here.
@@ -580,9 +576,10 @@ to give-birth
       set age-days 0
       set is-leader? false
       set group nobody
+      set effective-group-size 0
       
       ; The leader of this group is inherited from the mother. However this new whale must be added to that leader's group.
-      ask leader [set group (turtle-set group myself)]
+      ask leader [set group (turtle-set group myself) set effective-group-size get-effective-group-size ]
       
       ; size, whales-met, heading-out? bearing, and destination are all inherited from mother. So is days-to-birth (which should be -1). 
     ]
@@ -620,7 +617,6 @@ end
 ; assigns nutrition value to all the whales in the group based on the value of the prey.
 to hunt
   RUN-MONITOR 1 " is deciding to hunt"
-  let effective-group-size sum [effective-size] of group      ; number of whales in the group counting toward the hunt   
   let all-prey (get-prey-list effective-group-size)           ; lists every individual prey catchable, by type
   share-the-food all-prey
   
@@ -718,7 +714,6 @@ end
 ; Assumes that current-path is not empty.
 to continue-on-path
    let patches-can-travel (whale-speed / kmpp)      ; distance (in patch units) a whale can travel in one time step
-   let group-size (sum [effective-size] of group)   ; ** CAN BE USED TO DECIDE WHETHER TO PAUSE AND HUNT LOCALLY **
    
    RUN-MONITOR 3 (word " moving toward " destination " a distance of " patches-can-travel " patches.")
    
@@ -1045,6 +1040,10 @@ end
 ; It is dependent on the values of the sliders max-time-without-rest and rest-time
 to-report max-active-ratio
   report (max-time-without-rest / (rest-time + max-time-without-rest))
+end
+
+to-report get-effective-group-size
+  report sum ([effective-size] of group)
 end
 
 ;;;; Utility functions

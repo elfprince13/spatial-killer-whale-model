@@ -277,16 +277,14 @@ to-report water-patches-within [d cscale]
     set queue but-first queue         ; ... and update the queue
     
     ; If some neighbors of p further away from the starting point than d, then neighbors need not be examined
-    if (([visited?] of p) + 1 < d) [ 
-      
-      ask [neighbors4] of p [
-        if water? and (visited? < 0) [
-         let best-neighbor min-one-of neighbors with [water? and (visited? >= 0) and (segment-on-water? ([pxcor] of myself) ([pycor] of myself) pxcor pycor )] [visited? + (distance myself)]
-         set visited? ([visited? + (distance myself)] of best-neighbor)
-         set pcolor (pcolor + (.55 * cscale))
-         set queue lput self queue 
-        ]
+    if (([visited?] of p) + 1 < d) [  
+      let good-neighbors ([neighbors4] of p) with [water? and (visited? < 0)]
+      ask good-neighbors [
+        let best-neighbor min-one-of neighbors with [water? and (visited? >= 0) and (segment-on-water? ([pxcor] of myself) ([pycor] of myself) pxcor pycor )] [visited? + (distance myself)]
+        set visited? ([visited? + (distance myself)] of best-neighbor)
+        set pcolor (pcolor + (.55 * cscale))
       ]
+      set queue (SENTENCE queue ([self] of good-neighbors))
       
     ]
   ]
