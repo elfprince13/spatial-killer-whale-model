@@ -299,6 +299,136 @@ to movement-decisions
   ]
 end
 
+
+; ================= MEMORY-AND-LOCAL-KNOWLEDGE-BASED-DECISION-MAKING ====================
+; CONTEXT: One whale (should be a group leader)
+; Strategies (local optimization and past memory) to locate food
+; A whale will choose either to hunt in its current region, or to start traveling to another region.
+; seek-food will call either find-new-destination or toward-destination, and in either case it will end by hunting, moving, or both (if the distance is small)
+
+to seek-food
+  RUN-MONITOR 1  "called seek-food. Is seeking food and deciding where to travel"
+   ifelse destination = nobody [
+     move-toward-new-destination
+   ][
+     move-with-current-destination
+   ]
+end
+
+to move-toward-new-destination
+  let the-season hunting-season-of-day days                            ; Get the current season number for accessing seasonal memory structure
+  let travel-radius (whale-speed / kmpp)                               ; Distance in patches a whale can travel in one hour
+  let effective-group-size (sum [effective-size] of group)             ; The whale's group size, used to determine both hunting success and amount of sharing
+
+  ; find best patch for hunting locally
+  let nearby water-patches-within travel-radius 0
+  let best-nearby max-one-of nearby [kgs-to-be-gained-here effective-group-size]       ; patch in that radius with the most currently avaialable food
+  let best-local-gain expected-weight-gain-in-n-days-at evaluation-period best-nearby
+  
+   ; find best hunting region in memory for hunting right now
+  let expected-gain-list map [expected-weight-gain-in-n-days-based-on-memory evaluation-period ?] (item the-season memory)
+  let i index-of-max expected-gain-list
+
+  ifelse item i expected-gain-list > best-local-gain [
+    let best-region region-of (item i (item the-season memory))
+    ; Consider the best five places to hunt in the chosen region, and random select one of those five as a destination.
+    set destination one-of max-n-of 5 (item best-region hunting-region-sets) [kgs-to-be-gained-here effective-group-size]  
+    RUN-MONITOR 2 (word " has decided to hunt in region " best-region " and is creating a path for patch " destination)
+    set current-path sparse-path-to-patch destination
+    continue-on-path
+    ][
+     RUN-MONITOR 2 (" has decided to hunt local food and is clearing path.")
+     set destination nobody
+     set current-path (list )
+     move-to best-nearby
+     ask other group [move-to best-nearby]  
+     ;  **** If travel time less than 1/2 hour, then travel and hunt in the same turn. *** 
+     if ([visited?] of best-nearby < (travel-radius / 2)) [hunt]   
+  ]
+  ask nearby [set visited? -1]
+end
+
+; Report the index of the maximum item in this list of numbers
+to-report index-of-max [ l ]
+   let best 0
+   let i 1
+   while [i < length l][
+     if item i l > item best l [set best i]
+     set i i + 1
+   ]
+   report best
+end
+
+to move-with-current-destination
+    RUN-MONITOR 2 (word " has a destination " destination " and is evaluating local hunting to decide whether to continue.")
+    let effective-group-size (sum [effective-size] of group)             ; The whale's group size, used to determine both hunting success and amount of sharing
+    
+    ; find best patch for hunting locally
+    let travel-radius (whale-speed / kmpp)                                       ; Distance in patches a whale can travel in one hour
+    let nearby water-patches-within travel-radius 0
+    let best-nearby max-one-of nearby [kgs-to-be-gained-here effective-group-size]     ; patch in that radius with the most food
+    let best-local-gain expected-weight-gain-in-n-days-at evaluation-period best-nearby
+  
+   ifelse best-local-gain > 0 [
+      RUN-MONITOR 2 " has decided to abandon its destination and hunt locally."
+      set destination nobody
+      set current-path (list )
+      move-to best-nearby
+      ask other group [move-to best-nearby]  
+      ;  **** If travel time less than 1/2 hour, then travel and hunt in the same turn. *** 
+      if ([visited?] of best-nearby < (travel-radius / 2)) [hunt]   
+   ][
+      RUN-MONITOR 2 " has decided to continue toward its current destination."
+      continue-on-path
+   ]
+   ask nearby [set visited? -1]
+end
+
+
+
+; CONTEXT: One whale assumed to be a leader with a group.
+; num-days is an number representing the number of days that will be spent hunting
+; in proximity to a given patch
+; p is the patch the whale is evaluating
+; Reports the expected weight gain if the whale hunts for num-days based on the 
+; food currently available at patch p as an estimate of the surrounding region.  
+; Assumes the whale has knowledge of current conditions at patch p -- i.e. p is typically a nearby patch.  
+; Travel is assumed to be local. The whale estimates that  1/2 of its non-resting hours will be spent 
+; actually hunting and the rest will be spent moving about locally. 
+to-report expected-weight-gain-in-n-days-at [num-days p]
+  let effective-group-size (sum [effective-size] of group)              ; The whale's group size, used to determine both hunting success and amount of sharing
+  let hourly-gain [kgs-to-be-gained-here effective-group-size] of p     ; hourly kgs expectation to be gained nearby
+  let waking-hours (max-active-ratio * num-days * 24)                   ; total number of hours a whale is active (not resting) over the given number of days
+  let max-hunting-hours (waking-hours * 0.5)                            ; *** Since hunting causes prey to hide, whales spent 50% of their time moving around locally, and 50% hunting        
+  let kgs-gained (hourly-gain * max-hunting-hours)                      ; with the given number of hours to hunt, how many kgs of food will it get here.
+  let kcals-lost (compute-FMR * evaluation-period)                      ; how many kcals will a whale expend in energy in that same amount of time...
+  let kgs-lost  ((kcals-lost / WHALE-KCAL-PER-KG) * ENERGY-TO-MASS-EFFICIENCY)          ; ...converted to kgs.
+  report (kgs-gained - kgs-lost)                                        ; expected result of a whale hunting locally               
+end
+
+; CONTEXT: One whale assumed to be a leader with a group.
+; num-days is an number representing the number of days that will be spent hunting
+; in proximity to a given patch
+; mem is a memory triple (r,h,w). See memory file for more details.
+; Reports the expected weight gain if the whale hunts in the given region for num-days based on the 
+; memory of past hunting in that region.  
+; Assumes the whale will have to travel to that region and then will spend 1/2 of its
+; remaining non-resting time hunting and the other 1/2 traveling locally. 
+to-report expected-weight-gain-in-n-days-based-on-memory [num-days mem]
+    let r region-of mem        ; Extract the hunting region, total hours hunted, and total mass consumed, from the memory triple. 
+    let h total-hours-of mem    
+    let w total-mass-of mem
+    ; Compute the estimated hourly consumption gain (kgs) from hunting in that region, and also the travel time (hours) to that region
+    let hourly-gain (w / h)
+    let travel-time (estimated-distance-to r / whale-speed)
+    let waking-hours (max-active-ratio * num-days * 24)                   ; total number of hours a whale is active (not resting) over the given number of days
+    let max-hunting-hours (waking-hours * 0.5)                            ; *** Since hunting causes prey to hide, whales spent 50% of their time moving around locally, and 50% hunting        
+    let kgs-gained (hourly-gain * max-hunting-hours)                      ; with the given number of hours to hunt, how many kgs of food will it get here.
+    let kcals-lost (compute-FMR * evaluation-period)                      ; how many kcals will a whale expend in energy in that same amount of time...
+    let kgs-lost  ((kcals-lost / WHALE-KCAL-PER-KG) * ENERGY-TO-MASS-EFFICIENCY)          ; ...converted to kgs.
+    report (kgs-gained - kgs-lost)                                        ; expected result of a whale hunting locally               
+end
+
 ; CONTEXT: One whale
 ; This should be called once per day - that is, whenever hours=0, or equivalently when ticks mod 24 = 0.
 ; Convert food consumed (kcals-consumed) into body-mass (kgs)
@@ -560,104 +690,6 @@ end
 
 ; ====================== END OF EATING AND HUNTING ==============
 
-; ================= MEMORY-AND-LOCAL-KNOWLEDGE-BASED-DECISION-MAKING ====================
-; CONTEXT: One whale (should be a group leader)
-; Strategies (local optimization and past memory) to locate food
-; A whale will choose either to hunt in its current region, or to start traveling to another region.
-; seek-food will call either find-new-destination or toward-destination, and in either case it will end by hunting, moving, or both (if the distance is small)
-
-; The first procedure, seek-food, simply askes whether or not a whale already has a destination.
-; If a whale already has a destination, then the only quesiton is whether it has found enough local food to stop and hunt, or should continue.
-; If a whale does not already have a destination, then it will search its memory.
-to seek-food
-  RUN-MONITOR 1  "called seek-food. Is seeking food and deciding where to travel"
-;  ifelse destination = nobody [
-    find-new-destination
-;  ][
-;    toward-destination
-;  ]
-end
-
-to find-new-destination
-  RUN-MONITOR 1  "called find-new-destination. Is seeking food and deciding where to travel"
-  let the-season hunting-season-of-day days                                    ; Get the current season number for accessing seasonal memory structure
-  let travel-radius (whale-speed / kmpp)                                       ; Distance in patches a whale can travel in one hour
-  let group-size (sum [effective-size] of group)                               ; The whale's group size, used to determine both hunting success and amount of sharing
-
-  ; Estimate the whale's net weight gain (or loss if the number is negative) if it remains hunting nearby for the given number of days in evaluation-period.
-  ; To compute the kgs of food consumed...
-  ;  ... the estimated number of kgs a whale could get hourly if it hunts at the best spot within a 1 day radius is multiplied by the number of hours it will hunt
-  let nearby water-patches-within travel-radius 0
-  let best-nearby max-one-of nearby [kgs-to-be-gained-here group-size]     ; patch in that radius with the most food
-  let hourly-gain [kgs-to-be-gained-here group-size] of best-nearby                                          ; hourly kgs expectation to be gained nearby
-  let waking-hours (max-active-ratio * evaluation-period * 24)          ; total number of hours a whale is active (not resting) over the given number of days
-  let max-hunting-hours (waking-hours * 0.5)                            ; *** Since hunting causes prey to hide, whales spent 50% of their time moving around locally, and 50% hunting        
-  let kgs-gained (hourly-gain * max-hunting-hours)                      ; with the given number of hours to hunt, how many kgs of food will it get here.
-  let kcals-lost (compute-FMR * evaluation-period)                      ; how many kcals will a whale expend in energy in that same amount of time...
-  let kgs-lost  ((kcals-lost / WHALE-KCAL-PER-KG) * ENERGY-TO-MASS-EFFICIENCY)          ; ...converted to kgs.
-  let net-gain (kgs-gained - kgs-lost)                                  ; expected result of a whale hunting locally               
-  
-  ; Keep track of the best possible hunting so far.  If the best-region is "nobody", it means the whale hunts locally.
-  ; If the best-region stores the whale's current region, then the whale will start over again near the center of that region.
-  let best-region nobody  
-  let best-net-gain net-gain
-  
-  ; Continue to compare the best region considered so far with the estimated result of all the regions in the whale's memory for the current season.
-  foreach (item the-season memory) [
-    ; An item of the hunting memory for this season is a triple (r,h,w) where r is the region, h the number of hours hunted there during the same season of
-    ; this or some prior year, and w the total mass actually consumed by this whale while hunting in the given region and season.
-    ; Extract the three items from the whale memroy triple.
-    let r first ?
-    let h item 1 ?
-    let w last ?
-    ; Compute the estimated hourly consumption gain (kgs) from hunting in that region, and also the travel time (hours) to that region
-    set hourly-gain (w / h)
-    let travel-time (estimated-distance-to r / whale-speed)
-    
-    ; Find the max time that might be spent hunting. 
-    ; The evaluation period is in days, and needs to be mutiplied by 24 to convert to hours.
-    ; Actual hunting hours is the total number of hours times the ratio of active hours minus the long-distance time spent to travel to the region...
-    ; ... and at the end multiply by .5 under the assumption that after whales hunt one spot, the prey there will be hiding and more short-distance travel
-    ; will be needed. 
-    ; *** AS ABOVE, THE 0.5 CONSTANT PERHAPS SHOULD CHANGE. IN FACT, IF WHALE'S REST AFTER EATING, THIS MIGHT BE BUILT INTO THE RESTING. HOWEVER
-    ; WHALE TRACKING DATA SHOW LOTS OF LOCAL MOVEMENT ***
-    set waking-hours (max-active-ratio * evaluation-period * 24 - travel-time) 
-    set max-hunting-hours (waking-hours * 0.5)
-    
-    ; Given the number of hours actually hunting, find the total kgs expected to be consumed based on the whale's memory of prior hunting at the given region
-    set kgs-gained hourly-gain * max-hunting-hours
-    
-    ; Compute the whale's metabolic weight loss over the given period.  Note that compute-FMR is daily expected metabolic cost in kcals, and evaluation-period is in days
-    set kcals-lost (compute-FMR * evaluation-period)
-    set kgs-lost  ((kcals-lost / WHALE-KCAL-PER-KG) * ENERGY-TO-MASS-EFFICIENCY)
-    
-    ; compare the net-gain with the best seen so far, and update accordingly.
-    set net-gain kgs-gained - kgs-lost
-    if net-gain > best-net-gain [
-      set best-net-gain net-gain
-      set best-region r
-    ]
-  ]
- 
-  ; Set the destination.  If best-region = nobody, then there was no long-distance memory that would be better in the longer term than hunting with a one-hour radius
-  ifelse best-region = nobody [
-    ; It is already determined that best-nearby is within one hour travel.
-    ; The most computationally efficient is just to move the whale there -- though if the whale is being tracked, it might appear to move over land
-     RUN-MONITOR 1 (" has decided to hunt local food and is clearing path.")
-     set destination nobody
-     set current-path (list )
-     move-to best-nearby
-     ask other group [move-to best-nearby]  
-     if [visited?] of best-nearby < travel-radius / 2 [hunt]   ;  **** If travel time less than 1/2 hour, then travel and hunt in the same turn. MODIFY *****
-  ][  
-     RUN-MONITOR 1 (word " has decided to hunt in region " best-region " and is creating a path for that region.")
-     set destination max-one-of item best-region hunting-region-sets [kgs-to-be-gained-here group-size]  
-     set current-path sparse-path-to-patch destination
-     toward-destination 
-   ]
-   ask nearby [set visited? -1]           ; ******* PART OF THE USE OF visited? NEEDING COMMENTING **********
-end
-
 
 ; CONTEXT: One whale (should be a group leader)
 to socialize
@@ -679,29 +711,35 @@ to travel
      set current-path sparse-path-to-patch destination
      RUN-MONITOR 2 (word " found the following path: " current-path)
    ]
-   toward-destination
+   continue-on-path
 end
 
 ; Follow the path of patches stored in current-path for whatever distance a whale can travel in one time step.
-; Assumes that current-path is not empty, and that it starts with the whale's current patch or an adjacent patch.
-to toward-destination
+; Assumes that current-path is not empty.
+to continue-on-path
    let patches-can-travel (whale-speed / kmpp)      ; distance (in patch units) a whale can travel in one time step
    let group-size (sum [effective-size] of group)   ; ** CAN BE USED TO DECIDE WHETHER TO PAUSE AND HUNT LOCALLY **
    
    RUN-MONITOR 3 (word " moving toward " destination " a distance of " patches-can-travel " patches.")
-   DEBUG-MONITOR 3 (word " moving toward " destination " along path " current-path)
    
    ; Whale should now keep moving until the total movement is equal to its maximum hourly travel distance.
-   ; *** LATER ADD A WAY TO BREAK OUT OF THIS LOOP IF FODO IS FOUND -- ALSO A PROBABILISTIC VARIATION FROM THE ROUTE.
    while [patches-can-travel > 0 and length current-path > 0][
-      let next-patch first current-path                               ; Get the next patch of the current path
-      set current-path but-first current-path                         ; Update the current-path to remove one patch
-      let dist min (list (distance next-patch) patches-can-travel)    ; Determine how far the whale can travel
+      let next-patch first current-path                        ; Get the next patch of the current path, and face that patch
       face next-patch
-      fd dist
-      set patches-can-travel (patches-can-travel - dist)
+      
+      ; Go toward the next patch on the path.  Don't move further than the remaining number of patches-can-travel on this day.
+      ; If the next patch is reached, removed it from the list and keep going. Otherwise, set patches-can-travel to 0.
+      ifelse distance next-patch <= patches-can-travel [
+        set patches-can-travel (patches-can-travel - distance next-patch)
+        fd distance next-patch
+        set current-path but-first current-path
+      ][
+        fd patches-can-travel
+        set patches-can-travel 0
+      ]  
    ]
    
+   ; If the whale has reached its destination, it should clear its path. 
    if patch-here = destination [
      RUN-MONITOR 1 (word " reached destination " destination)
      set current-path (list ) 
@@ -715,7 +753,11 @@ to toward-destination
      set heading [heading] of myself
    ]
 
+   ; If it took less than 1/2 an hour, it can still hunt.
+   if patches-can-travel > whale-speed / kmpp [hunt]
 end
+
+
 
 ;; ===================================== NON-MOVING WHALE BEHAVIOR PROCEDURES =====================================
 ; CONTEXT: One whale

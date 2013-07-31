@@ -313,3 +313,16 @@ end
 to-report number-hunting-seasons
   report ceiling (365 / days-per-hunting-season)
 end
+
+;  REPORTERS FOR EACH OF THE THREE ITEMS IN A MEMORY TRIPLE mem
+to-report region-of [mem]
+  report first mem
+end
+
+to-report total-hours-of [mem]
+  report item 1 mem
+end
+
+to-report total-mass-of [mem]
+  report last mem
+end
