@@ -625,7 +625,7 @@ to hunt
   share-the-food all-prey
   
   ; PREY IN THE AREA ARE NOW "WARNED" ABOUT THE HUNTING FOR SOME SPECIFIED TIME
-  ask water in-radius hiding-radius [set prey-hiding hiding-time]
+  ask patches in-radius hiding-radius with [water?] [set prey-hiding hiding-time]
 end
 
 
