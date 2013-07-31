@@ -290,7 +290,7 @@ to-report water-patches-within [d cscale]
       
     ]
   ]
-  let result water with [visited? >= 0]
+  let result patches in-radius d with [water? and visited? >= 0]
   ;ask result [set visited? -1] ; don't keep this line in the finished code, it should be done externally, but keep it here for testing-sake to save doing it manually each time
   report result
 end 
