@@ -33,8 +33,6 @@ globals [num-seasons
     distributions    ; See descriptions above
     average-seasonal-area
 ]
-
-patches-own [test-value]
   
 ; Initialize the seasonal prey distribution lists -- make data structures empty lists
 to init-distribution-structures 
@@ -188,7 +186,7 @@ to seasonal-distribution [prey-type day-of-year]
   DEBUG-MONITOR 0 (word "Seasonal distribution for prey-type " prey-type ", " (item NAME# (item prey-type prey-data)) " on season including day " day-of-year) 
   
   ; Find the number of the season corresponding to the given day.
-  let season-index get-season-from-day prey-type day-of-year
+  let season-index current-prey-season prey-type day-of-year
   DEBUG-MONITOR 1 (word "Prey-type " prey-type " has day " day-of-year " in season number " season-index) 
 
   
@@ -265,21 +263,6 @@ to seasonal-distribution [prey-type day-of-year]
   ]
 end
 
-; Search the seasons-data structure for the prey of the given to find the index of the season containing the day of the given number.
-to-report get-season-from-day [prey-type day-of-year]
-  ; Get the index of the season number that contains day-of-year in the seasons-data structure. 
-  let seasons-ct (item prey-type num-seasons)
-  let season-index (seasons-ct - 1)   
-  ; If the first season listed (season 0) begins with day > 0, then day 0 is part of the final season in the list.
-  ; Otherwise, loop backwards through the seasons to find the latest season that does not start after the given day-of-year
-  if day-of-year > (item 0 (item prey-type seasons-data)) [
-    while [day-of-year <= (item season-index (item prey-type seasons-data))][
-      set season-index (season-index - 1)
-    ]
-  ]
-  report season-index
-end
-
 ; Context: ONE PATCH
 ; Add n to the number of prey of the given class-type and given prey-type
 to add-to-prey-class-count [prey-type class-type n]
@@ -336,10 +319,6 @@ end
 ; classs is the number of the age-class of the given prey-type
 ; prey-count is an integer representing the total number to be distributed.
 ; p is the patch around which prey are to be distribution
-; The total of test-value for coastal patches should be ~ n * p-coast.
-; The total of test-value for open-water patches should be ~ n * (1 - p-coast)
-; The total of test-value for coastal patches within distance sd-coast of p should be ~ 1 standard deviation of n * p-coast
-; The total of test-value for open-water patches within distance sd-water of p should be ~ 1 standard deviation of n * (1 - p-coast)
 
 to distribute-prey-about-patch [prey-type class-type prey-count central-patch probabilities distribution-patchsets distribution-cells]  
   ; Assume probabilities has been properly normalized
