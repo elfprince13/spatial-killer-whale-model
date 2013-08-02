@@ -464,15 +464,14 @@ to label-water
   ; Find all land patches adjacent to water. These will be used by water patches to (more efficiently) find the nearest shoreline, without measuring distance to all land.
   let shoreline patches with [(region >= 0) and (any? neighbors with [water? and shore-dist >= 0])]
   
-  let label-queue []
+  let label-queue [self] of shoreline
   ask water [ set visited? false ]
-  ask shoreline [ set label-queue lput self label-queue ]
   
   while [not empty? label-queue] [
    let p first label-queue
    set label-queue but-first label-queue
-   ask [neighbors4] of p [
-     if water? and not visited? [
+   ask ([neighbors4] of p) [
+     if (water? and not visited?) [
        set label-queue lput self label-queue
        let best-neighbor nobody
        ifelse shore-dist <= 0 [
@@ -485,9 +484,8 @@ to label-water
        ]
        set region [region] of best-neighbor
        set pcolor region * 10 + 7.5
-       set visited? true
-       
-     ]  
+       set visited? true 
+     ]
    ]  
   ]   
 end
