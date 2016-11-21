@@ -1,3 +1,3 @@
-# Spatial agent-based killer whale simulation
+# Spatial Agent-based Orca Simulation
 
-2D agent-based model simulation of transient killer whales, using [NetLogo](https://ccl.northwestern.edu/netlogo/) (currently targeting NetLogo 5).
+2D agent-based model simulation of transient orcas, using [NetLogo](https://ccl.northwestern.edu/netlogo/) (currently targeting NetLogo 5).
